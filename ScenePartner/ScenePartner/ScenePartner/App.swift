@@ -1,5 +1,5 @@
 // App.swift
-// ScenePartner — App entry point. Injects shared services into the SwiftUI environment.
+// ScenePartner — App entry point.
 
 import SwiftUI
 
@@ -12,12 +12,18 @@ struct ScenePartnerMain: App {
 
     var body: some Scene {
         WindowGroup {
-            NavigationStack {
-                ScriptListView()
-            }
-            .environmentObject(scriptStore)
-            .environmentObject(connectivity)
-            .environmentObject(settings)
+            RootView()
+                .environmentObject(scriptStore)
+                .environmentObject(connectivity)
+                .environmentObject(settings)
+        }
+    }
+}
+
+struct RootView: View {
+    var body: some View {
+        NavigationStack {
+            ScriptListView()
         }
     }
 }

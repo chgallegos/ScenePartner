@@ -161,7 +161,7 @@ final class RehearsalEngine: ObservableObject {
                                          sceneTones: sceneTones,
                                          analysis: toneAnalysis)
 
-        voiceEngine.speak(text: line.text, profile: profile) { [weak self] in
+        voiceEngine.speak(text: line.text, profile: profile) { @Sendable [weak self] in
             guard let self else { return }
             self.markCurrentLineDone()
             self.moveToNextLine()
