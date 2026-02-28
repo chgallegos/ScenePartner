@@ -2,14 +2,13 @@
 import SwiftUI
 
 @main
-@MainActor
 struct ScenePartnerMain: App {
 
     @StateObject private var scriptStore = ScriptStore()
     @StateObject private var connectivity = ConnectivityMonitor()
     @StateObject private var settings = AppSettings()
 
-    var body: some Scene {
+    var body: WindowGroup<ContentView> {
         WindowGroup {
             ContentView()
                 .environmentObject(scriptStore)
