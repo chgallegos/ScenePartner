@@ -71,8 +71,18 @@ struct RehearsalView: View {
                         .foregroundStyle(.blue)
                 case .waitingForUser:
                     if engine.isListeningForUser {
-                        Label("Speak your line...", systemImage: "mic.fill")
-                            .foregroundStyle(.red)
+                        HStack(spacing: 8) {
+                            Image(systemName: "mic.fill").foregroundStyle(.red)
+                            Text("Speak your line...").foregroundStyle(.red)
+                            // Live audio level meter
+                            HStack(spacing: 2) {
+                                ForEach(0..<8, id: \.self) { i in
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(Float(i) / 8.0 < engine.audioLevel ? Color.red : Color.red.opacity(0.2))
+                                        .frame(width: 4, height: CGFloat(6 + i * 2))
+                                }
+                            }
+                        }
                     } else {
                         Label("Your line — tap Next", systemImage: "hand.tap")
                             .foregroundStyle(.green)

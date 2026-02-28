@@ -12,7 +12,6 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
     private var completionHandler: (() -> Void)?
     private var isPlaying = false
 
-    // Direction context injected before speaking
     var sceneDirection: SceneDirection = .empty
 
     static let defaultVoiceID = "onwK4e9ZLuTAKqWW03F9"  // Daniel
@@ -31,6 +30,7 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
         isPlaying = true
 
         if apiKey.isEmpty {
+            print("[ElevenLabs] ⚠️ No API key — using AVSpeech fallback")
             fallback.speak(text: text, profile: profile, completion: completion)
             return
         }
@@ -40,8 +40,11 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
                 let audioData = try await fetchAudio(text: text, profile: profile)
                 await MainActor.run { self.playAudio(data: audioData, completion: completion) }
             } catch {
-                print("[ElevenLabs] Error: \(error) — using fallback")
-                await MainActor.run { self.fallback.speak(text: text, profile: profile, completion: completion) }
+                print("[ElevenLabs] ❌ Error: \(error) — using AVSpeech fallback")
+                await MainActor.run {
+                    self.isPlaying = false
+                    self.fallback.speak(text: text, profile: profile, completion: completion)
+                }
             }
         }
     }
@@ -50,9 +53,23 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
     func pause()  { player?.pause(); fallback.pause() }
     func resume() { player?.play(); fallback.resume() }
 
-    // MARK: - API Call
+    // MARK: - API
 
     private func fetchAudio(text: String, profile: VoiceProfile) async throws -> Data {
+        let stability = stabilityFromDirection()
+        let style = styleFromDirection()
+
+        print("""
+        [ElevenLabs] 🎭 Sending to API:
+          text: "\(text.prefix(60))..."
+          voiceID: \(voiceID)
+          stability: \(stability)
+          style: \(style)
+          tones: \(allTones())
+          emotional state: \(allEmotionalStates())
+          objective: \(allObjectives())
+        """)
+
         let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(voiceID)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -60,11 +77,6 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 10
-
-        // Map emotional direction to voice stability
-        // More emotional/tense = lower stability = more expressive variation
-        let stability = stabilityFromProfile(profile)
-        let style = styleFromDirection()
 
         let body: [String: Any] = [
             "text": text,
@@ -79,33 +91,49 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else { throw VoiceError.apiError }
+
+        print("[ElevenLabs] ✅ Response: HTTP \(http.statusCode), \(data.count) bytes")
+
+        guard (200..<300).contains(http.statusCode) else {
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            print("[ElevenLabs] ❌ API error body: \(body)")
             throw VoiceError.apiError
         }
         return data
     }
 
-    /// More expressive tones = lower stability (more human variation)
-    private func stabilityFromProfile(_ profile: VoiceProfile) -> Double {
-        let expressiveTones = ["angry", "desperate", "fearful", "urgent", "defiant"]
-        let calmTones = ["intimate", "mysterious", "sad", "vulnerable"]
+    // MARK: - Direction → Voice Parameters
 
-        // Check current scene direction for tone cues
-        let allTones = sceneDirection.characterDirections.values.flatMap { $0.tone }
-
-        if allTones.contains(where: { expressiveTones.contains($0) }) {
-            return 0.30  // Very expressive
-        } else if allTones.contains(where: { calmTones.contains($0) }) {
-            return 0.55  // Controlled, subtle
-        }
-        return 0.45  // Default — natural variation
+    private func allTones() -> [String] {
+        sceneDirection.characterDirections.values.flatMap { $0.tone }
     }
 
-    /// Style exaggeration based on emotional intensity
+    private func allEmotionalStates() -> String {
+        sceneDirection.characterDirections.values
+            .map { $0.emotionalState }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    private func allObjectives() -> String {
+        sceneDirection.characterDirections.values
+            .map { $0.objective }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    private func stabilityFromDirection() -> Double {
+        let tones = allTones()
+        let expressive = ["angry", "desperate", "fearful", "urgent", "defiant", "bitter"]
+        let calm = ["intimate", "mysterious", "sad", "vulnerable", "loving"]
+        if tones.contains(where: { expressive.contains($0) }) { return 0.28 }
+        if tones.contains(where: { calm.contains($0) }) { return 0.55 }
+        return 0.42
+    }
+
     private func styleFromDirection() -> Double {
-        let highIntensity = ["angry", "desperate", "urgent", "defiant", "fearful"]
-        let allTones = sceneDirection.characterDirections.values.flatMap { $0.tone }
-        if allTones.contains(where: { highIntensity.contains($0) }) { return 0.55 }
+        let tones = allTones()
+        let highIntensity = ["angry", "desperate", "urgent", "defiant", "fearful", "tense"]
+        let lowIntensity = ["intimate", "sad", "mysterious", "vulnerable"]
+        if tones.contains(where: { highIntensity.contains($0) }) { return 0.60 }
+        if tones.contains(where: { lowIntensity.contains($0) }) { return 0.15 }
         return 0.30
     }
 
@@ -114,21 +142,29 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
     private func playAudio(data: Data, completion: @escaping () -> Void) {
         let tmpURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + ".mp3")
-        do { try data.write(to: tmpURL) } catch {
-            fallback.speak(text: "", profile: .default, completion: completion)
+        do {
+            try data.write(to: tmpURL)
+            print("[ElevenLabs] 🔊 Playing audio from: \(tmpURL.lastPathComponent)")
+        } catch {
+            print("[ElevenLabs] ❌ Failed to write audio file: \(error)")
+            isPlaying = false
+            completion()
             return
         }
 
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback, mode: .spokenAudio, options: [.duckOthers])
 
         playerItem = AVPlayerItem(url: tmpURL)
         player = AVPlayer(playerItem: playerItem)
-        NotificationCenter.default.addObserver(self, selector: #selector(playerDidFinish),
-                                               name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(playerDidFinish),
+            name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
         player?.play()
     }
 
     @objc private func playerDidFinish() {
+        print("[ElevenLabs] ✅ Playback finished")
         isPlaying = false
         let handler = completionHandler
         completionHandler = nil

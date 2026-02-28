@@ -8,6 +8,9 @@ final class RehearsalEngine: ObservableObject {
     @Published private(set) var state: RehearsalState = RehearsalState()
     @Published private(set) var isListeningForUser = false
 
+    /// Live microphone level (0.0-1.0) — for UI meter display
+    var audioLevel: Float { speechRecognizer.audioLevel }
+
     var currentLine: Line? {
         guard state.currentLineIndex < script.lines.count else { return nil }
         return script.lines[state.currentLineIndex]
