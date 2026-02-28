@@ -1,23 +1,20 @@
 // App.swift
 import SwiftUI
 
-// Using a single shared AppState object avoids Xcode 26 beta @StateObject/@main conformance issues
-final class AppState: ObservableObject {
-    let scriptStore = ScriptStore()
-    let connectivity = ConnectivityMonitor()
-    let settings = AppSettings()
-}
-
 @main
+@MainActor
 struct ScenePartnerMain: App {
-    @StateObject private var appState = AppState()
+
+    @StateObject private var scriptStore = ScriptStore()
+    @StateObject private var connectivity = ConnectivityMonitor()
+    @StateObject private var settings = AppSettings()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(appState.scriptStore)
-                .environmentObject(appState.connectivity)
-                .environmentObject(appState.settings)
+                .environmentObject(scriptStore)
+                .environmentObject(connectivity)
+                .environmentObject(settings)
         }
     }
 }
