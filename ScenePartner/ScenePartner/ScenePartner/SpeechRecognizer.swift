@@ -43,7 +43,8 @@ final class SpeechRecognizer: ObservableObject {
             isListening = true
         } catch {
             print("[SpeechRecognizer] Failed to start: \(error)")
-            // Fall through gracefully — tap-to-advance still works
+            // Fail gracefully — tap-to-advance still works
+            completion("")
         }
     }
 
@@ -59,13 +60,12 @@ final class SpeechRecognizer: ObservableObject {
         recognitionRequest = nil
         recognitionTask = nil
         isListening = false
-        // Restore audio session for TTS playback
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio,
-                                                          options: [.duckOthers])
+        // Restore playback session for TTS
+        try? AVAudioSession.sharedInstance().setCategory(
+            .playback, mode: .spokenAudio, options: [.duckOthers])
     }
 
     private func startAudioEngine() throws {
-        // Reset engine if needed
         if audioEngine.isRunning {
             audioEngine.stop()
             audioEngine.inputNode.removeTap(onBus: 0)
@@ -82,10 +82,15 @@ final class SpeechRecognizer: ObservableObject {
         recognitionRequest.requiresOnDeviceRecognition = true
 
         let inputNode = audioEngine.inputNode
-        // Use the input node's NATIVE format — avoids sample rate mismatch crash
-        let recordingFormat = inputNode.inputFormat(forBus: 0)
+        // Use native hardware format — prevents sample rate mismatch crash
+        let nativeFormat = inputNode.inputFormat(forBus: 0)
+        
+        // Validate format before installing tap
+        guard nativeFormat.sampleRate > 0 && nativeFormat.channelCount > 0 else {
+            throw SpeechError.invalidFormat
+        }
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
         }
 
@@ -106,7 +111,6 @@ final class SpeechRecognizer: ObservableObject {
             }
         }
 
-        // Safety timeout
         silenceTimer = Timer.scheduledTimer(withTimeInterval: maxListenTime, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.finishListening() }
         }
@@ -125,4 +129,6 @@ final class SpeechRecognizer: ObservableObject {
         onComplete?(text)
         onComplete = nil
     }
+
+    enum SpeechError: Error { case invalidFormat }
 }
