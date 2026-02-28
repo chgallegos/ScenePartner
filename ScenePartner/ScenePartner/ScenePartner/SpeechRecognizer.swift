@@ -105,7 +105,7 @@ final class SpeechRecognizer: ObservableObject {
 
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .measurement,
-                                options: [.duckOthers, .defaultToSpeaker, .allowBluetooth])
+                                options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()

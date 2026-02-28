@@ -18,16 +18,11 @@ struct Take: Identifiable, Equatable {
 
     var displayName: String { "Take \(number)" }
     var formattedDuration: String {
-        // Read duration from file metadata without async call
-        let asset = AVURLAsset(url: url)
-        var secs = 0
-        // timeRange from tracks is synchronous on iOS 16+
-        if let track = asset.tracks(withMediaType: .video).first {
-            let dur = track.timeRange.duration
-            if dur.isValid && !dur.isIndefinite {
-                secs = Int(dur.seconds)
-            }
-        }
+        // Use CMTime from URL asset keys for synchronous access
+        guard let durationValue = AVURLAsset(url: url)
+            .value(forKey: "duration") as? CMTime,
+              durationValue.isValid && !durationValue.isIndefinite else { return "" }
+        let secs = Int(durationValue.seconds)
         return String(format: "%d:%02d", secs / 60, secs % 60)
     }
 }
