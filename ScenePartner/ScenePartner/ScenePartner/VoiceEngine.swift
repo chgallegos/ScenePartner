@@ -1,13 +1,11 @@
 // VoiceEngine.swift
-// ScenePartner — Protocol-based voice abstraction.
-
 import Foundation
 import AVFoundation
 
-// MARK: - VoiceEngineProtocol
+// MARK: - Protocol
 
 protocol VoiceEngineProtocol: AnyObject {
-    func speak(text: String, profile: VoiceProfile, completion: @escaping @Sendable () -> Void)
+    func speak(text: String, profile: VoiceProfile, completion: @escaping () -> Void)
     func stop()
     func pause()
     func resume()
@@ -15,8 +13,9 @@ protocol VoiceEngineProtocol: AnyObject {
 }
 
 // MARK: - SpeechManager
+// @unchecked Sendable: we manually ensure thread safety via DispatchQueue.main
 
-final class SpeechManager: NSObject, VoiceEngineProtocol {
+final class SpeechManager: NSObject, VoiceEngineProtocol, @unchecked Sendable {
 
     private let synthesizer = AVSpeechSynthesizer()
     private var completionHandler: (() -> Void)?
@@ -31,7 +30,7 @@ final class SpeechManager: NSObject, VoiceEngineProtocol {
         synthesizer.isSpeaking && !synthesizer.isPaused
     }
 
-    func speak(text: String, profile: VoiceProfile, completion: @escaping @Sendable () -> Void) {
+    func speak(text: String, profile: VoiceProfile, completion: @escaping () -> Void) {
         if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
         completionHandler = completion
 
@@ -41,15 +40,13 @@ final class SpeechManager: NSObject, VoiceEngineProtocol {
         utterance.pitchMultiplier = profile.pitch.clamped(to: 0.5...2.0)
         utterance.volume = profile.volume.clamped(to: 0.0...1.0)
 
-        if let identifier = profile.voiceIdentifier,
-           let voice = AVSpeechSynthesisVoice(identifier: identifier) {
+        if let id = profile.voiceIdentifier,
+           let voice = AVSpeechSynthesisVoice(identifier: id) {
             utterance.voice = voice
         }
-
         if #available(iOS 17.0, *) {
             utterance.postUtteranceDelay = Double(profile.pauseAfterMs) / 1000.0
         }
-
         synthesizer.speak(utterance)
     }
 
@@ -58,35 +55,26 @@ final class SpeechManager: NSObject, VoiceEngineProtocol {
         completionHandler = nil
     }
 
-    func pause() { synthesizer.pauseSpeaking(at: .word) }
+    func pause()  { synthesizer.pauseSpeaking(at: .word) }
     func resume() { synthesizer.continueSpeaking() }
 
     private func configureAudioSession() {
-        try? AVAudioSession.sharedInstance().setCategory(
-            .playback, mode: .spokenAudio, options: [.duckOthers])
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
     }
 }
 
-// MARK: - Delegate
-
 extension SpeechManager: AVSpeechSynthesizerDelegate {
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                           didFinish utterance: AVSpeechUtterance) {
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         DispatchQueue.main.async { [weak self] in
             self?.completionHandler?()
             self?.completionHandler = nil
         }
     }
-
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                           didCancel utterance: AVSpeechUtterance) {
-        completionHandler = nil
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        DispatchQueue.main.async { [weak self] in self?.completionHandler = nil }
     }
 }
-
-// MARK: - Helpers
 
 private extension Float {
     func clamped(to range: ClosedRange<Float>) -> Float {
