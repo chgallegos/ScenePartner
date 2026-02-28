@@ -1,19 +1,15 @@
 // CameraEngine.swift
-// ScenePartner — Manages camera preview, recording, and take storage.
-// Uses AVCaptureSession + AVAssetWriter to record video + audio simultaneously.
-
 import AVFoundation
 import SwiftUI
 import Photos
 
-@MainActor
-final class CameraEngine: NSObject, ObservableObject {
+final class CameraEngine: NSObject, ObservableObject, @unchecked Sendable {
 
     // MARK: - Published State
     @Published private(set) var isRecording = false
     @Published private(set) var isSessionRunning = false
     @Published private(set) var recordingDuration: TimeInterval = 0
-    @Published private(set) var countdownValue: Int? = nil    // 3, 2, 1, nil = recording
+    @Published private(set) var countdownValue: Int? = nil
     @Published private(set) var permissionsGranted = false
     @Published private(set) var currentTake: Int = 1
     @Published var isFrontCamera = true
@@ -21,12 +17,11 @@ final class CameraEngine: NSObject, ObservableObject {
     // MARK: - Capture Session
     let session = AVCaptureSession()
     private var videoInput: AVCaptureDeviceInput?
-    private var audioInput: AVCaptureDeviceInput?
     private let videoDataOutput = AVCaptureVideoDataOutput()
     private let audioDataOutput = AVCaptureAudioDataOutput()
-    private let sessionQueue = DispatchQueue(label: "com.scenepartner.camera")
+    private let sessionQueue = DispatchQueue(label: "com.scenepartner.camera", qos: .userInitiated)
 
-    // MARK: - Asset Writer (recording)
+    // MARK: - Asset Writer
     private var assetWriter: AVAssetWriter?
     private var videoWriterInput: AVAssetWriterInput?
     private var audioWriterInput: AVAssetWriterInput?
@@ -34,11 +29,9 @@ final class CameraEngine: NSObject, ObservableObject {
     private var outputURL: URL?
     private var durationTimer: Timer?
 
-    // MARK: - Take Storage
+    // MARK: - State
     private var scriptID: UUID = UUID()
     private var sceneIndex: Int = 0
-
-    // MARK: - Init
 
     override init() {
         super.init()
@@ -48,20 +41,11 @@ final class CameraEngine: NSObject, ObservableObject {
     // MARK: - Permissions
 
     func requestPermissions() {
-        let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
-
-        if cameraStatus == .authorized && micStatus == .authorized {
-            permissionsGranted = true
-            setupSession()
-            return
-        }
-
         AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
             guard granted else { return }
-            AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
-                guard granted else { return }
-                Task { @MainActor in
+            AVCaptureDevice.requestAccess(for: .audio) { [weak self] audioGranted in
+                guard audioGranted else { return }
+                DispatchQueue.main.async {
                     self?.permissionsGranted = true
                     self?.setupSession()
                 }
@@ -81,23 +65,20 @@ final class CameraEngine: NSObject, ObservableObject {
         session.beginConfiguration()
         session.sessionPreset = .high
 
-        // Video input
+        // Video
         let position: AVCaptureDevice.Position = isFrontCamera ? .front : .back
         if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position),
-           let input = try? AVCaptureDeviceInput(device: device) {
-            if session.canAddInput(input) {
-                session.addInput(input)
-                videoInput = input
-            }
+           let input = try? AVCaptureDeviceInput(device: device),
+           session.canAddInput(input) {
+            session.addInput(input)
+            videoInput = input
         }
 
-        // Audio input
+        // Audio
         if let mic = AVCaptureDevice.default(for: .audio),
-           let input = try? AVCaptureDeviceInput(device: mic) {
-            if session.canAddInput(input) {
-                session.addInput(input)
-                audioInput = input
-            }
+           let input = try? AVCaptureDeviceInput(device: mic),
+           session.canAddInput(input) {
+            session.addInput(input)
         }
 
         // Video output
@@ -105,10 +86,11 @@ final class CameraEngine: NSObject, ObservableObject {
         videoDataOutput.alwaysDiscardsLateVideoFrames = true
         if session.canAddOutput(videoDataOutput) {
             session.addOutput(videoDataOutput)
-            // Mirror front camera
-            if let connection = videoDataOutput.connection(with: .video) {
-                connection.isVideoMirrored = isFrontCamera
-                connection.videoRotationAngle = 90
+            if let conn = videoDataOutput.connection(with: .video) {
+                conn.isVideoMirrored = isFrontCamera
+                if conn.isVideoRotationAngleSupported(90) {
+                    conn.videoRotationAngle = 90
+                }
             }
         }
 
@@ -119,30 +101,32 @@ final class CameraEngine: NSObject, ObservableObject {
         }
 
         session.commitConfiguration()
-
         session.startRunning()
-        Task { @MainActor in self.isSessionRunning = true }
+
+        DispatchQueue.main.async { self.isSessionRunning = true }
     }
 
     func flipCamera() {
-        isFrontCamera.toggle()
+        let newFront = !isFrontCamera
+        DispatchQueue.main.async { self.isFrontCamera = newFront }
+
         sessionQueue.async { [weak self] in
-            self?.session.beginConfiguration()
-            if let input = self?.videoInput { self?.session.removeInput(input) }
+            guard let self else { return }
+            self.session.beginConfiguration()
+            if let old = self.videoInput { self.session.removeInput(old) }
 
-            let position: AVCaptureDevice.Position = (self?.isFrontCamera == true) ? .front : .back
-            if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position),
-               let input = try? AVCaptureDeviceInput(device: device),
-               self?.session.canAddInput(input) == true {
-                self?.session.addInput(input)
-                self?.videoInput = input
+            let pos: AVCaptureDevice.Position = newFront ? .front : .back
+            if let dev = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: pos),
+               let input = try? AVCaptureDeviceInput(device: dev),
+               self.session.canAddInput(input) {
+                self.session.addInput(input)
+                self.videoInput = input
             }
-
-            if let connection = self?.videoDataOutput.connection(with: .video) {
-                connection.isVideoMirrored = self?.isFrontCamera == true
-                connection.videoRotationAngle = 90
+            if let conn = self.videoDataOutput.connection(with: .video) {
+                conn.isVideoMirrored = newFront
+                if conn.isVideoRotationAngleSupported(90) { conn.videoRotationAngle = 90 }
             }
-            self?.session.commitConfiguration()
+            self.session.commitConfiguration()
         }
     }
 
@@ -156,9 +140,9 @@ final class CameraEngine: NSObject, ObservableObject {
 
         Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
             guard let self else { timer.invalidate(); return }
-            Task { @MainActor in
-                if let current = self.countdownValue, current > 1 {
-                    self.countdownValue = current - 1
+            DispatchQueue.main.async {
+                if let v = self.countdownValue, v > 1 {
+                    self.countdownValue = v - 1
                 } else {
                     self.countdownValue = nil
                     timer.invalidate()
@@ -172,60 +156,58 @@ final class CameraEngine: NSObject, ObservableObject {
         let url = takeURL(scriptID: scriptID, sceneIndex: sceneIndex, take: currentTake)
         outputURL = url
 
-        do {
-            assetWriter = try AVAssetWriter(outputURL: url, fileType: .mp4)
-        } catch {
-            print("[CameraEngine] ❌ Failed to create AssetWriter: \(error)")
-            return
+        guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mp4) else {
+            print("[CameraEngine] ❌ Failed to create writer"); return
         }
+        assetWriter = writer
 
-        // Video settings
-        let videoSettings: [String: Any] = [
+        let vs: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: 1080,
-            AVVideoHeightKey: 1920
+            AVVideoWidthKey: 1080, AVVideoHeightKey: 1920
         ]
-        videoWriterInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        videoWriterInput = AVAssetWriterInput(mediaType: .video, outputSettings: vs)
         videoWriterInput?.expectsMediaDataInRealTime = true
 
-        // Audio settings
-        let audioSettings: [String: Any] = [
+        let as_: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: 44100,
             AVNumberOfChannelsKey: 1,
             AVEncoderBitRateKey: 128000
         ]
-        audioWriterInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+        audioWriterInput = AVAssetWriterInput(mediaType: .audio, outputSettings: as_)
         audioWriterInput?.expectsMediaDataInRealTime = true
 
-        if let vi = videoWriterInput, assetWriter?.canAdd(vi) == true { assetWriter?.add(vi) }
-        if let ai = audioWriterInput, assetWriter?.canAdd(ai) == true { assetWriter?.add(ai) }
+        if let vi = videoWriterInput, writer.canAdd(vi) { writer.add(vi) }
+        if let ai = audioWriterInput, writer.canAdd(ai) { writer.add(ai) }
 
         sessionAtSourceTime = nil
-        assetWriter?.startWriting()
+        writer.startWriting()
 
-        isRecording = true
-        recordingDuration = 0
-        durationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.recordingDuration += 0.1 }
+        DispatchQueue.main.async {
+            self.isRecording = true
+            self.recordingDuration = 0
+            self.durationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                self?.recordingDuration += 0.1
+            }
         }
-        print("[CameraEngine] 🔴 Recording started: \(url.lastPathComponent)")
+        print("[CameraEngine] 🔴 Recording: \(url.lastPathComponent)")
     }
 
     func stopRecording(completion: @escaping (URL?) -> Void) {
         guard isRecording else { completion(nil); return }
-        isRecording = false
-        durationTimer?.invalidate()
-        durationTimer = nil
+
+        DispatchQueue.main.async {
+            self.isRecording = false
+            self.durationTimer?.invalidate()
+        }
 
         videoWriterInput?.markAsFinished()
         audioWriterInput?.markAsFinished()
+        let url = outputURL
 
-        assetWriter?.finishWriting { [weak self] in
-            guard let self else { return }
-            let url = self.outputURL
-            print("[CameraEngine] ✅ Recording saved: \(url?.lastPathComponent ?? "unknown")")
-            Task { @MainActor in completion(url) }
+        assetWriter?.finishWriting {
+            print("[CameraEngine] ✅ Saved: \(url?.lastPathComponent ?? "")")
+            DispatchQueue.main.async { completion(url) }
         }
     }
 
@@ -235,13 +217,13 @@ final class CameraEngine: NSObject, ObservableObject {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Takes", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("\(scriptID.uuidString)_scene\(sceneIndex)_take\(take).mp4")
+        return dir.appendingPathComponent("\(scriptID.uuidString)_s\(sceneIndex)_t\(take).mp4")
     }
 
     func savedTakes(scriptID: UUID, sceneIndex: Int) -> [URL] {
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Takes")
-        let prefix = "\(scriptID.uuidString)_scene\(sceneIndex)_take"
+        let prefix = "\(scriptID.uuidString)_s\(sceneIndex)_t"
         return (try? FileManager.default.contentsOfDirectory(
             at: dir, includingPropertiesForKeys: [.creationDateKey]
         ))?.filter { $0.lastPathComponent.hasPrefix(prefix) }
@@ -252,23 +234,18 @@ final class CameraEngine: NSObject, ObservableObject {
         savedTakes(scriptID: scriptID, sceneIndex: sceneIndex).count + 1
     }
 
-    func deleteTake(at url: URL) {
-        try? FileManager.default.removeItem(at: url)
-    }
-
-    // MARK: - Export to Camera Roll
+    func deleteTake(at url: URL) { try? FileManager.default.removeItem(at: url) }
 
     func exportToPhotoLibrary(url: URL, completion: @escaping (Bool) -> Void) {
-        PHPhotoLibrary.requestAuthorization { status in
-            guard status == .authorized else {
-                Task { @MainActor in completion(false) }
-                return
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async { completion(false) }; return
             }
             PHPhotoLibrary.shared().performChanges({
                 PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
             }) { success, error in
                 if let error { print("[CameraEngine] Export error: \(error)") }
-                Task { @MainActor in completion(success) }
+                DispatchQueue.main.async { completion(success) }
             }
         }
     }
@@ -279,15 +256,13 @@ final class CameraEngine: NSObject, ObservableObject {
 extension CameraEngine: AVCaptureVideoDataOutputSampleBufferDelegate,
                          AVCaptureAudioDataOutputSampleBufferDelegate {
 
-    nonisolated func captureOutput(_ output: AVCaptureOutput,
-                                   didOutput sampleBuffer: CMSampleBuffer,
-                                   from connection: AVCaptureConnection) {
-        guard let writer = assetWriter,
-              writer.status == .writing else { return }
+    func captureOutput(_ output: AVCaptureOutput,
+                       didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        guard let writer = assetWriter, writer.status == .writing else { return }
 
         let isVideo = output is AVCaptureVideoDataOutput
 
-        // Set start time on first sample
         if sessionAtSourceTime == nil {
             let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             sessionAtSourceTime = time
