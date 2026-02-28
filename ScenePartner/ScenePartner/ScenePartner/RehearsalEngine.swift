@@ -1,72 +1,38 @@
 // RehearsalEngine.swift
-// ScenePartner — The heart of the app. Drives the rehearsal state machine.
-//
-// State machine:
-//   idle ──start()──► playingPartner ──done──► waitingForUser
-//                                              │
-//                         ◄──advance()─────────┘
-//                         │
-//                   playingPartner (next partner line) ──► ...
-//                                          │
-//                                    (end of script)
-//                                          │
-//                                       finished
-//
-// pause()/resume() work from any active state (playingPartner / waitingForUser).
-
 import Foundation
 import Combine
 
 @MainActor
 final class RehearsalEngine: ObservableObject {
 
-    // MARK: - Published State
-
     @Published private(set) var state: RehearsalState = RehearsalState()
 
-    /// The current line the user/audience is focused on.
     var currentLine: Line? {
         guard state.currentLineIndex < script.lines.count else { return nil }
         return script.lines[state.currentLineIndex]
     }
-
-    // MARK: - Dependencies
 
     private(set) var script: Script
     private let voiceEngine: VoiceEngineProtocol
     private let toneEngine: ToneEngine
     private var toneAnalysis: ToneAnalysis?
 
-    // MARK: - Init
-
-    nonisolated init(script: Script,
-                     voiceEngine: VoiceEngineProtocol,
-                     toneEngine: ToneEngine,
-                     toneAnalysis: ToneAnalysis? = nil) {
+    init(script: Script, voiceEngine: VoiceEngineProtocol, toneEngine: ToneEngine,
+         toneAnalysis: ToneAnalysis? = nil) {
         self.script = script
         self.voiceEngine = voiceEngine
         self.toneEngine = toneEngine
         self.toneAnalysis = toneAnalysis
     }
 
-    // MARK: - Configuration
-
-    /// Call before start(). Determines which characters the user plays.
     func setUserCharacters(_ characters: Set<String>) {
         state.userCharacters = Set(characters.map { $0.uppercased() })
     }
 
-    func setImprovMode(_ on: Bool) {
-        state.isImprovModeOn = on
-    }
+    func setImprovMode(_ on: Bool) { state.isImprovModeOn = on }
 
-    func injectToneAnalysis(_ analysis: ToneAnalysis) {
-        toneAnalysis = analysis
-    }
+    func injectToneAnalysis(_ analysis: ToneAnalysis) { toneAnalysis = analysis }
 
-    // MARK: - Controls
-
-    /// Begin rehearsal from the current index (default: 0).
     func start(from index: Int = 0) {
         guard state.status == .idle || state.status == .finished else { return }
         state.currentLineIndex = index
@@ -79,16 +45,12 @@ final class RehearsalEngine: ObservableObject {
         guard state.status == .playingPartner || state.status == .waitingForUser else { return }
         let previous = state.status
         state.status = .paused
-        if previous == .playingPartner {
-            voiceEngine.pause()
-        }
+        if previous == .playingPartner { voiceEngine.pause() }
     }
 
     func resume() {
         guard state.status == .paused else { return }
-        // Determine what we were doing before pause
-        let line = currentLine
-        if line?.type == .dialogue && isPartnerLine(line) {
+        if currentLine?.type == .dialogue && isPartnerLine(currentLine) {
             state.status = .playingPartner
             voiceEngine.resume()
         } else {
@@ -96,23 +58,19 @@ final class RehearsalEngine: ObservableObject {
         }
     }
 
-    /// User manually advances their own line (tap-to-proceed MVP).
     func advance() {
         guard state.status == .waitingForUser else { return }
         markCurrentLineDone()
         moveToNextLine()
     }
 
-    /// Skip back to the previous dialogue line.
     func back() {
         voiceEngine.stop()
-        let target = previousDialogueIndex(before: state.currentLineIndex)
-        state.currentLineIndex = target
+        state.currentLineIndex = previousDialogueIndex(before: state.currentLineIndex)
         state.status = .idle
         processCurrentLine()
     }
 
-    /// Jump to a specific line index (e.g. from scene picker).
     func jump(to index: Int) {
         guard index >= 0 && index < script.lines.count else { return }
         voiceEngine.stop()
@@ -127,44 +85,35 @@ final class RehearsalEngine: ObservableObject {
         state.currentLineIndex = 0
     }
 
-    // MARK: - State Machine Core
+    // MARK: - State Machine
 
     private func processCurrentLine() {
         guard state.currentLineIndex < script.lines.count else {
             state.status = .finished
             return
         }
-
         let line = script.lines[state.currentLineIndex]
-
         switch line.type {
         case .sceneHeading, .stageDirection:
-            // Non-dialogue: advance silently
             moveToNextLine()
-
         case .dialogue:
-            if isPartnerLine(line) {
-                speakPartnerLine(line)
-            } else {
-                // User's line — wait for tap
-                state.status = .waitingForUser
-            }
+            if isPartnerLine(line) { speakPartnerLine(line) }
+            else { state.status = .waitingForUser }
         }
     }
 
     private func speakPartnerLine(_ line: Line) {
         state.status = .playingPartner
-
         let speaker = line.speaker ?? "NARRATOR"
-        let sceneTones = sceneTones(for: line.sceneIndex)
-        let profile = toneEngine.profile(for: speaker,
-                                         sceneTones: sceneTones,
-                                         analysis: toneAnalysis)
+        let tones = toneAnalysis?.sceneTone ?? []
+        let profile = toneEngine.profile(for: speaker, sceneTones: tones, analysis: toneAnalysis)
 
-        voiceEngine.speak(text: line.text, profile: profile) { @Sendable [weak self] in
-            guard let self else { return }
-            self.markCurrentLineDone()
-            self.moveToNextLine()
+        voiceEngine.speak(text: line.text, profile: profile) { [weak self] in
+            // Dispatch back to MainActor since the completion fires from a background queue
+            Task { @MainActor [weak self] in
+                self?.markCurrentLineDone()
+                self?.moveToNextLine()
+            }
         }
     }
 
@@ -182,8 +131,6 @@ final class RehearsalEngine: ObservableObject {
         state.completedLineIndices.insert(state.currentLineIndex)
     }
 
-    // MARK: - Helpers
-
     private func isPartnerLine(_ line: Line?) -> Bool {
         guard let line, let speaker = line.speaker else { return false }
         return !state.userCharacters.contains(speaker.uppercased())
@@ -196,12 +143,5 @@ final class RehearsalEngine: ObservableObject {
             i -= 1
         }
         return 0
-    }
-
-    private func sceneTones(for sceneIndex: Int?) -> [String] {
-        guard let sceneIndex else { return [] }
-        // If tone analysis is available and maps scene tones, return them
-        // For now: return the global scene_tone from analysis (per-scene mapping is a future feature)
-        return toneAnalysis?.sceneTone ?? []
     }
 }
