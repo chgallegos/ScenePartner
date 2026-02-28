@@ -12,19 +12,20 @@ struct RehearsalView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var showScenePicker = false
 
-    init(script: Script, userCharacters: Set<String>, isImprovMode: Bool) {
+    init(script: Script, userCharacters: Set<String>, isImprovMode: Bool, sceneDirection: SceneDirection = .empty) {
         self.script = script
         self.userCharacters = userCharacters
         self.isImprovMode = isImprovMode
 
-        // Pick voice engine: ElevenLabs if key exists + online, else AVSpeech
         let settings = AppSettings()
         let voiceEngine: VoiceEngineProtocol
         if !settings.elevenLabsAPIKey.isEmpty && settings.useAIVoice {
-            voiceEngine = ElevenLabsVoiceEngine(
+            let el = ElevenLabsVoiceEngine(
                 apiKey: settings.elevenLabsAPIKey,
                 voiceID: settings.elevenLabsVoiceID
             )
+            el.sceneDirection = sceneDirection
+            voiceEngine = el
         } else {
             voiceEngine = SpeechManager()
         }

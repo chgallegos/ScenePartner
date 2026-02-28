@@ -1,32 +1,32 @@
 // RoleSelectionView.swift
-// ScenePartner — User picks which character(s) they are playing.
-
 import SwiftUI
 
 struct RoleSelectionView: View {
-
     let script: Script
 
     @State private var selectedCharacters: Set<String> = []
     @State private var isImprovMode: Bool = false
+    @State private var sceneDirection = SceneDirection.empty
+    @State private var showDirection = false
     @State private var navigateToRehearsal = false
+
+    var partnerCharacters: [Character] {
+        script.characters.filter { !selectedCharacters.contains($0.name) }
+    }
 
     var body: some View {
         Form {
             Section {
-                Text("Select the character(s) you'll be performing. The AI partner will play everyone else.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text("Select the character(s) you'll be performing. The AI partner plays everyone else.")
+                    .font(.subheadline).foregroundStyle(.secondary)
             }
 
-            Section("Characters") {
+            Section("Your Character") {
                 ForEach(script.characters) { character in
                     CharacterRowView(
                         character: character,
                         isSelected: selectedCharacters.contains(character.name)
-                    ) {
-                        toggle(character.name)
-                    }
+                    ) { toggle(character.name) }
                 }
             }
 
@@ -34,43 +34,85 @@ struct RoleSelectionView: View {
                 Toggle("Improv Mode", isOn: $isImprovMode)
                 if isImprovMode {
                     Label("Partner may paraphrase. Disable to enforce script-only.", systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                        .font(.caption).foregroundStyle(.orange)
                 }
             }
 
             Section {
+                // Direction button
+                Button {
+                    showDirection = true
+                } label: {
+                    HStack {
+                        Image(systemName: "theatermasks.fill")
+                            .foregroundStyle(.purple)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Set Character Direction")
+                                .font(.body.weight(.medium))
+                            Text(hasDirection ? "Direction set ✓" : "Give the AI emotional context")
+                                .font(.caption)
+                                .foregroundStyle(hasDirection ? .green : .secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.secondary).font(.caption)
+                    }
+                }
+                .disabled(selectedCharacters.isEmpty)
+
+                // Start button
                 NavigationLink(
                     destination: RehearsalView(
                         script: script,
                         userCharacters: selectedCharacters,
-                        isImprovMode: isImprovMode
-                    )
-                ) {
+                        isImprovMode: isImprovMode,
+                        sceneDirection: sceneDirection
+                    ),
+                    isActive: $navigateToRehearsal
+                ) { EmptyView() }
+
+                Button {
+                    navigateToRehearsal = true
+                } label: {
                     HStack {
                         Spacer()
-                        Label("Start Rehearsal", systemImage: "play.fill")
-                            .font(.headline)
+                        Label("Start Rehearsal", systemImage: "play.fill").font(.headline)
                         Spacer()
                     }
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(selectedCharacters.isEmpty)
             }
         }
         .navigationTitle(script.title)
-        .navigationBarTitleDisplayMode(.large)
+        .sheet(isPresented: $showDirection) {
+            NavigationStack {
+                DirectionView(
+                    script: script,
+                    partnerCharacters: partnerCharacters,
+                    sceneDirection: $sceneDirection
+                ) {
+                    showDirection = false
+                    navigateToRehearsal = true
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { showDirection = false }
+                    }
+                }
+            }
+        }
+    }
+
+    private var hasDirection: Bool {
+        !sceneDirection.sceneContext.isEmpty ||
+        sceneDirection.characterDirections.values.contains { !$0.emotionalState.isEmpty }
     }
 
     private func toggle(_ name: String) {
-        if selectedCharacters.contains(name) {
-            selectedCharacters.remove(name)
-        } else {
-            selectedCharacters.insert(name)
-        }
+        if selectedCharacters.contains(name) { selectedCharacters.remove(name) }
+        else { selectedCharacters.insert(name) }
     }
 }
-
-// MARK: - CharacterRowView
 
 struct CharacterRowView: View {
     let character: Character
@@ -81,18 +123,12 @@ struct CharacterRowView: View {
         Button(action: onTap) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(character.name)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Text("\(character.lineCount) lines")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(character.name).font(.headline).foregroundStyle(.primary)
+                    Text("\(character.lineCount) lines").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.blue)
-                        .font(.title2)
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue).font(.title2)
                 }
             }
         }

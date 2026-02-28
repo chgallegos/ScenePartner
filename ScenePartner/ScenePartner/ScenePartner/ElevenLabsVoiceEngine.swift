@@ -1,28 +1,22 @@
 // ElevenLabsVoiceEngine.swift
-// ScenePartner — Neural voice engine using ElevenLabs API.
-// Falls back to AVSpeechSynthesizer when offline or API unavailable.
-
 import Foundation
 import AVFoundation
 
 final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sendable {
 
-    // MARK: - Config
-    // Get your API key at elevenlabs.io — store in Settings, never hardcode
     private let apiKey: String
-    
-    // Default voice IDs from ElevenLabs — swap these for any voice you want
-    // Browse voices at elevenlabs.io/voice-library
-    static let defaultVoiceID = "onwK4e9ZLuTAKqWW03F9"  // Daniel — deep, clear, natural
-    static let femaleVoiceID  = "EXAVITQu4vr4xnSDxMaL"  // Bella — warm, natural
-    
     private let voiceID: String
     private let fallback = SpeechManager()
     private var player: AVPlayer?
     private var playerItem: AVPlayerItem?
     private var completionHandler: (() -> Void)?
     private var isPlaying = false
-    private var useFallback = false
+
+    // Direction context injected before speaking
+    var sceneDirection: SceneDirection = .empty
+
+    static let defaultVoiceID = "onwK4e9ZLuTAKqWW03F9"  // Daniel
+    static let femaleVoiceID  = "EXAVITQu4vr4xnSDxMaL"  // Bella
 
     var isSpeaking: Bool { isPlaying }
 
@@ -32,15 +26,12 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
         super.init()
     }
 
-    // MARK: - VoiceEngineProtocol
-
     func speak(text: String, profile: VoiceProfile, completion: @escaping () -> Void) {
         completionHandler = completion
         isPlaying = true
 
         if apiKey.isEmpty {
-            // No API key — use fallback silently
-            useFallbackSpeech(text: text, profile: profile, completion: completion)
+            fallback.speak(text: text, profile: profile, completion: completion)
             return
         }
 
@@ -49,31 +40,17 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
                 let audioData = try await fetchAudio(text: text, profile: profile)
                 await MainActor.run { self.playAudio(data: audioData, completion: completion) }
             } catch {
-                print("[ElevenLabs] API error: \(error) — falling back to AVSpeech")
-                await MainActor.run { self.useFallbackSpeech(text: text, profile: profile, completion: completion) }
+                print("[ElevenLabs] Error: \(error) — using fallback")
+                await MainActor.run { self.fallback.speak(text: text, profile: profile, completion: completion) }
             }
         }
     }
 
-    func stop() {
-        player?.pause()
-        player = nil
-        isPlaying = false
-        fallback.stop()
-        completionHandler = nil
-    }
+    func stop()   { player?.pause(); player = nil; isPlaying = false; fallback.stop(); completionHandler = nil }
+    func pause()  { player?.pause(); fallback.pause() }
+    func resume() { player?.play(); fallback.resume() }
 
-    func pause() {
-        player?.pause()
-        fallback.pause()
-    }
-
-    func resume() {
-        player?.play()
-        fallback.resume()
-    }
-
-    // MARK: - ElevenLabs API
+    // MARK: - API Call
 
     private func fetchAudio(text: String, profile: VoiceProfile) async throws -> Data {
         let url = URL(string: "https://api.elevenlabs.io/v1/text-to-speech/\(voiceID)")!
@@ -82,18 +59,20 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
         request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 10
 
-        // Map our VoiceProfile to ElevenLabs voice settings
-        // stability: 0.3-0.5 = more expressive/variable, 0.7-1.0 = more consistent
-        // similarity_boost: how closely it follows the original voice
-        let stability = Double(1.0 - (profile.rate - 0.3))  // faster speech = less stable = more expressive
+        // Map emotional direction to voice stability
+        // More emotional/tense = lower stability = more expressive variation
+        let stability = stabilityFromProfile(profile)
+        let style = styleFromDirection()
+
         let body: [String: Any] = [
             "text": text,
-            "model_id": "eleven_turbo_v2_5",  // fastest, lowest latency
+            "model_id": "eleven_turbo_v2_5",
             "voice_settings": [
-                "stability": max(0.3, min(0.9, stability)),
+                "stability": stability,
                 "similarity_boost": 0.75,
-                "style": 0.35,              // some style exaggeration for drama
+                "style": style,
                 "use_speaker_boost": true
             ]
         ]
@@ -106,33 +85,46 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
         return data
     }
 
+    /// More expressive tones = lower stability (more human variation)
+    private func stabilityFromProfile(_ profile: VoiceProfile) -> Double {
+        let expressiveTones = ["angry", "desperate", "fearful", "urgent", "defiant"]
+        let calmTones = ["intimate", "mysterious", "sad", "vulnerable"]
+
+        // Check current scene direction for tone cues
+        let allTones = sceneDirection.characterDirections.values.flatMap { $0.tone }
+
+        if allTones.contains(where: { expressiveTones.contains($0) }) {
+            return 0.30  // Very expressive
+        } else if allTones.contains(where: { calmTones.contains($0) }) {
+            return 0.55  // Controlled, subtle
+        }
+        return 0.45  // Default — natural variation
+    }
+
+    /// Style exaggeration based on emotional intensity
+    private func styleFromDirection() -> Double {
+        let highIntensity = ["angry", "desperate", "urgent", "defiant", "fearful"]
+        let allTones = sceneDirection.characterDirections.values.flatMap { $0.tone }
+        if allTones.contains(where: { highIntensity.contains($0) }) { return 0.55 }
+        return 0.30
+    }
+
     // MARK: - Playback
 
     private func playAudio(data: Data, completion: @escaping () -> Void) {
-        // Write to temp file — AVPlayer needs a URL
         let tmpURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString + ".mp3")
-        do {
-            try data.write(to: tmpURL)
-        } catch {
-            useFallbackSpeech(text: "", profile: .default, completion: completion)
+        do { try data.write(to: tmpURL) } catch {
+            fallback.speak(text: "", profile: .default, completion: completion)
             return
         }
 
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio,
-                                                          options: [.duckOthers])
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
 
         playerItem = AVPlayerItem(url: tmpURL)
         player = AVPlayer(playerItem: playerItem)
-
-        // Observe when playback ends
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(playerDidFinish),
-            name: .AVPlayerItemDidPlayToEndTime,
-            object: playerItem
-        )
-
+        NotificationCenter.default.addObserver(self, selector: #selector(playerDidFinish),
+                                               name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
         player?.play()
     }
 
@@ -141,12 +133,6 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
         let handler = completionHandler
         completionHandler = nil
         DispatchQueue.main.async { handler?() }
-    }
-
-    private func useFallbackSpeech(text: String, profile: VoiceProfile, completion: @escaping () -> Void) {
-        isPlaying = false
-        if text.isEmpty { completion(); return }
-        fallback.speak(text: text, profile: profile, completion: completion)
     }
 
     enum VoiceError: Error { case apiError }

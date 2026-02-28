@@ -17,7 +17,7 @@ final class SpeechRecognizer: ObservableObject {
     private var silenceTimer: Timer?
     private var onComplete: ((String) -> Void)?
 
-    private let silenceThreshold: TimeInterval = 0.6
+    private let silenceThreshold: TimeInterval = 0.7
     private let maxListenTime: TimeInterval = 30.0
 
     init() {
@@ -34,7 +34,11 @@ final class SpeechRecognizer: ObservableObject {
     }
 
     func startListening(completion: @escaping (String) -> Void) {
-        guard permissionGranted else { requestPermission(); return }
+        guard permissionGranted else {
+            requestPermission()
+            // Don't call completion — let user grant permission first
+            return
+        }
         guard !isListening else { return }
         onComplete = completion
         transcribedText = ""
@@ -43,8 +47,8 @@ final class SpeechRecognizer: ObservableObject {
             isListening = true
         } catch {
             print("[SpeechRecognizer] Failed to start: \(error)")
-            // Fail gracefully — tap-to-advance still works
-            completion("")
+            isListening = false
+            // Fail gracefully — don't auto-advance, let user tap manually
         }
     }
 
@@ -60,32 +64,36 @@ final class SpeechRecognizer: ObservableObject {
         recognitionRequest = nil
         recognitionTask = nil
         isListening = false
-        // Restore playback session for TTS
+
+        // Restore audio session for TTS playback
         try? AVAudioSession.sharedInstance().setCategory(
             .playback, mode: .spokenAudio, options: [.duckOthers])
+        try? AVAudioSession.sharedInstance().setActive(true)
     }
 
     private func startAudioEngine() throws {
+        // Clean up any previous session
         if audioEngine.isRunning {
             audioEngine.stop()
             audioEngine.inputNode.removeTap(onBus: 0)
         }
 
+        // Switch audio session to record mode
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .measurement,
-                                options: [.duckOthers, .defaultToSpeaker])
+                                options: [.duckOthers, .defaultToSpeaker, .allowBluetooth])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
         guard let recognitionRequest else { return }
         recognitionRequest.shouldReportPartialResults = true
-        recognitionRequest.requiresOnDeviceRecognition = true
+        // Don't require on-device — allows fallback to server recognition
+        // which is more reliable across simulator + device
+        recognitionRequest.requiresOnDeviceRecognition = false
 
         let inputNode = audioEngine.inputNode
-        // Use native hardware format — prevents sample rate mismatch crash
         let nativeFormat = inputNode.inputFormat(forBus: 0)
-        
-        // Validate format before installing tap
+
         guard nativeFormat.sampleRate > 0 && nativeFormat.channelCount > 0 else {
             throw SpeechError.invalidFormat
         }
@@ -106,11 +114,15 @@ final class SpeechRecognizer: ObservableObject {
                     self.resetSilenceTimer()
                 }
             }
-            if error != nil || result?.isFinal == true {
+            if let error = error {
+                print("[SpeechRecognizer] Recognition error: \(error)")
+                Task { @MainActor in self.finishListening() }
+            } else if result?.isFinal == true {
                 Task { @MainActor in self.finishListening() }
             }
         }
 
+        // Max time safety valve
         silenceTimer = Timer.scheduledTimer(withTimeInterval: maxListenTime, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.finishListening() }
         }
