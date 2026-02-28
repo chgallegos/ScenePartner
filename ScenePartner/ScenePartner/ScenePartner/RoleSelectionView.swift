@@ -8,7 +8,6 @@ struct RoleSelectionView: View {
     @State private var isImprovMode: Bool = false
     @State private var sceneDirection = SceneDirection.empty
     @State private var showDirection = false
-    @State private var navigateToRehearsal = false
 
     var partnerCharacters: [Character] {
         script.characters.filter { !selectedCharacters.contains($0.name) }
@@ -58,28 +57,43 @@ struct RoleSelectionView: View {
                     }
                 }
                 .disabled(selectedCharacters.isEmpty)
+            }
 
-                // Start button
+            Section {
+                // Rehearse button
                 NavigationLink(
                     destination: RehearsalView(
                         script: script,
                         userCharacters: selectedCharacters,
                         isImprovMode: isImprovMode,
                         sceneDirection: sceneDirection
-                    ),
-                    isActive: $navigateToRehearsal
-                ) { EmptyView() }
-
-                Button {
-                    navigateToRehearsal = true
-                } label: {
+                    )
+                ) {
                     HStack {
+                        Image(systemName: "play.fill").foregroundStyle(.blue)
+                        Text("Rehearse").font(.headline)
                         Spacer()
-                        Label("Start Rehearsal", systemImage: "play.fill").font(.headline)
-                        Spacer()
+                        Text("Practice mode").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .disabled(selectedCharacters.isEmpty)
+
+                // Self-Tape button
+                NavigationLink(
+                    destination: SelfTapeView(
+                        script: script,
+                        userCharacters: selectedCharacters,
+                        isImprovMode: isImprovMode,
+                        sceneDirection: sceneDirection
+                    )
+                ) {
+                    HStack {
+                        Image(systemName: "video.fill").foregroundStyle(.red)
+                        Text("Record Self-Tape").font(.headline)
+                        Spacer()
+                        Text("Camera + AI partner").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 .disabled(selectedCharacters.isEmpty)
             }
         }
