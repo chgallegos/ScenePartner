@@ -1,0 +1,43 @@
+// ConnectivityMonitor.swift
+// ScenePartner — Monitors network reachability using Network.framework.
+//               Online features check isConnected before any network call.
+
+import Foundation
+import Network
+import Combine
+
+@MainActor
+final class ConnectivityMonitor: ObservableObject {
+
+    @Published private(set) var isConnected: Bool = false
+    @Published private(set) var connectionType: ConnectionType = .none
+
+    enum ConnectionType {
+        case none, wifi, cellular, wired, other
+    }
+
+    private let monitor = NWPathMonitor()
+    private let queue = DispatchQueue(label: "com.scenepartner.connectivity")
+
+    init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            DispatchQueue.main.async {
+                self?.isConnected = path.status == .satisfied
+                self?.connectionType = Self.type(from: path)
+            }
+        }
+        monitor.start(queue: queue)
+    }
+
+    deinit {
+        monitor.cancel()
+    }
+
+    private static func type(from path: NWPath) -> ConnectionType {
+        if path.usesInterfaceType(.wifi) { return .wifi }
+        if path.usesInterfaceType(.cellular) { return .cellular }
+        if path.usesInterfaceType(.wiredEthernet) { return .wired }
+        if path.status == .satisfied { return .other }
+        return .none
+    }
+}
