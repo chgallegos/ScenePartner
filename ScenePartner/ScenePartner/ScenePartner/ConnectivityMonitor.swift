@@ -1,12 +1,7 @@
 // ConnectivityMonitor.swift
-// ScenePartner — Monitors network reachability using Network.framework.
-//               Online features check isConnected before any network call.
-
 import Foundation
 import Network
-import Combine
 
-@MainActor
 final class ConnectivityMonitor: ObservableObject {
 
     @Published private(set) var isConnected: Bool = false

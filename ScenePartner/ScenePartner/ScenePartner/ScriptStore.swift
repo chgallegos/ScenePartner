@@ -1,22 +1,10 @@
 // ScriptStore.swift
-// ScenePartner — Manages saving, loading, and deleting scripts from local storage.
-//
-// Storage strategy:
-//   • One JSON file per script in the app's Documents directory
-//   • File name format: <script.id>.json
-//   • No iCloud sync by default (privacy-first)
-
 import Foundation
 import Combine
 
-@MainActor
 final class ScriptStore: ObservableObject {
 
-    // MARK: - Published State
-
     @Published private(set) var scripts: [Script] = []
-
-    // MARK: - Private
 
     private let parser = ScriptParser()
     private let fileManager = FileManager.default
@@ -29,15 +17,10 @@ final class ScriptStore: ObservableObject {
         documentsURL.appendingPathComponent("\(id.uuidString).json")
     }
 
-    // MARK: - Init
-
     init() {
         loadAll()
     }
 
-    // MARK: - CRUD
-
-    /// Parse raw text into a new Script and persist it.
     @discardableResult
     func createScript(title: String, rawText: String) -> Script {
         var script = parser.parse(rawText: rawText, title: title)
@@ -58,8 +41,7 @@ final class ScriptStore: ObservableObject {
     }
 
     func update(_ script: Script) {
-        var updated = script
-        updated = Script(
+        let updated = Script(
             id: script.id,
             title: script.title,
             rawText: script.rawText,
@@ -76,12 +58,9 @@ final class ScriptStore: ObservableObject {
     }
 
     func delete(_ script: Script) {
-        let url = fileURL(for: script.id)
-        try? fileManager.removeItem(at: url)
+        try? fileManager.removeItem(at: fileURL(for: script.id))
         scripts.removeAll { $0.id == script.id }
     }
-
-    // MARK: - Persistence
 
     private func save(_ script: Script) {
         let url = fileURL(for: script.id)
@@ -98,12 +77,14 @@ final class ScriptStore: ObservableObject {
             at: documentsURL, includingPropertiesForKeys: nil
         ) else { return }
 
-        let jsonURLs = urls.filter { $0.pathExtension == "json" }
-        scripts = jsonURLs.compactMap { url -> Script? in
-            guard let data = try? Data(contentsOf: url),
-                  let script = try? JSONDecoder().decode(Script.self, from: data)
-            else { return nil }
-            return script
-        }.sorted { $0.updatedAt > $1.updatedAt }
+        scripts = urls
+            .filter { $0.pathExtension == "json" }
+            .compactMap { url -> Script? in
+                guard let data = try? Data(contentsOf: url),
+                      let script = try? JSONDecoder().decode(Script.self, from: data)
+                else { return nil }
+                return script
+            }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 }
