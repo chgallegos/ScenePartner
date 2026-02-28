@@ -39,10 +39,10 @@ final class RehearsalEngine: ObservableObject {
 
     // MARK: - Init
 
-    init(script: Script,
-         voiceEngine: VoiceEngineProtocol,
-         toneEngine: ToneEngine = ToneEngine(),
-         toneAnalysis: ToneAnalysis? = nil) {
+    nonisolated init(script: Script,
+                     voiceEngine: VoiceEngineProtocol,
+                     toneEngine: ToneEngine,
+                     toneAnalysis: ToneAnalysis? = nil) {
         self.script = script
         self.voiceEngine = voiceEngine
         self.toneEngine = toneEngine

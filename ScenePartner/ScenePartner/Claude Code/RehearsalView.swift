@@ -46,11 +46,11 @@ struct RehearsalView: View {
 
         let speechManager = SpeechManager()
         let toneEngine = ToneEngine()
-        let eng = RehearsalEngine(script: script,
-                                   voiceEngine: speechManager,
-                                   toneEngine: toneEngine)
-        eng.setUserCharacters(userCharacters)
-        eng.setImprovMode(isImprovMode)
+        let eng = RehearsalEngine(
+            script: script,
+            voiceEngine: speechManager,
+            toneEngine: toneEngine
+        )
         _engine = StateObject(wrappedValue: eng)
         _teleprompter = StateObject(wrappedValue: TeleprompterEngine())
     }
@@ -98,6 +98,8 @@ struct RehearsalView: View {
             }
         }
         .onAppear {
+            engine.setUserCharacters(userCharacters)
+            engine.setImprovMode(isImprovMode)
             if engine.state.status == .idle {
                 engine.start()
             }
