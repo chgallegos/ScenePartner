@@ -153,14 +153,23 @@ final class RehearsalEngine: ObservableObject {
 
     private func startListeningIfEnabled() {
         guard listenModeEnabled else { return }
+
+        // Simulator has no real mic — skip listen mode automatically
+        #if targetEnvironment(simulator)
+        print("[RehearsalEngine] Simulator detected — listen mode disabled, use tap to advance")
+        return
+        #endif
+
         guard speechRecognizer.permissionGranted else {
             speechRecognizer.requestPermission()
             return
         }
         isListeningForUser = true
-        speechRecognizer.startListening { [weak self] _ in
+        print("[RehearsalEngine] 🎤 Starting listen mode for user line")
+        speechRecognizer.startListening { [weak self] spokenText in
             Task { @MainActor [weak self] in
                 guard let self, self.state.status == .waitingForUser else { return }
+                print("[RehearsalEngine] 📝 User spoke: \"\(spokenText)\" — advancing")
                 self.isListeningForUser = false
                 self.markCurrentLineDone()
                 self.moveToNextLine()
