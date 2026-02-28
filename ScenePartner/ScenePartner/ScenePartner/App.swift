@@ -4,18 +4,24 @@ import SwiftUI
 @main
 struct ScenePartnerMain: App {
 
-    @StateObject private var scriptStore = ScriptStore()
-    @StateObject private var connectivity = ConnectivityMonitor()
-    @StateObject private var settings = AppSettings()
+    @State private var scriptStore = ScriptStore()
+    @State private var connectivity = ConnectivityMonitor()
+    @State private var settings = AppSettings()
 
     var body: some Scene {
         WindowGroup {
-            NavigationStack {
-                ScriptListView()
-            }
-            .environmentObject(scriptStore)
-            .environmentObject(connectivity)
-            .environmentObject(settings)
+            ContentView()
+                .environment(scriptStore)
+                .environment(connectivity)
+                .environment(settings)
+        }
+    }
+}
+
+struct ContentView: View {
+    var body: some View {
+        NavigationStack {
+            ScriptListView()
         }
     }
 }

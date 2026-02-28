@@ -1,33 +1,38 @@
 // AppSettings.swift
-// ScenePartner — Persisted user preferences via @AppStorage.
-
 import SwiftUI
-import Combine
 
-final class AppSettings: ObservableObject {
-
-    // MARK: - Online / Privacy
-
-    /// When true, ALL network calls are disabled regardless of connectivity.
-    @AppStorage("localOnlyMode") var localOnlyMode: Bool = false
-
-    /// Whether the optional tone analysis feature is enabled.
-    @AppStorage("toneAnalysisEnabled") var toneAnalysisEnabled: Bool = true
-
-    /// Whether the post-run coaching feedback feature is enabled.
-    @AppStorage("coachingEnabled") var coachingEnabled: Bool = true
-
-    // MARK: - Teleprompter Defaults
-
-    @AppStorage("defaultFontSize") var defaultFontSize: Double = 28
-    @AppStorage("defaultScrollSpeed") var defaultScrollSpeed: Double = 1.0
-    @AppStorage("mirrorMode") var mirrorMode: Bool = false
-
-    // MARK: - Voice Defaults
-
-    /// BCP-47 voice identifier (nil = system default)
-    @AppStorage("defaultVoiceIdentifier") var defaultVoiceIdentifier: String = ""
-
-    @AppStorage("defaultSpeechRate") var defaultSpeechRate: Double = 0.5
-    @AppStorage("defaultSpeechPitch") var defaultSpeechPitch: Double = 1.0
+@Observable
+final class AppSettings {
+    var localOnlyMode: Bool {
+        get { UserDefaults.standard.bool(forKey: "localOnlyMode") }
+        set { UserDefaults.standard.set(newValue, forKey: "localOnlyMode") }
+    }
+    var toneAnalysisEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "toneAnalysisEnabled") }
+        set { UserDefaults.standard.set(newValue, forKey: "toneAnalysisEnabled") }
+    }
+    var coachingEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "coachingEnabled") }
+        set { UserDefaults.standard.set(newValue, forKey: "coachingEnabled") }
+    }
+    var defaultFontSize: Double {
+        get { UserDefaults.standard.double(forKey: "defaultFontSize") == 0 ? 28 : UserDefaults.standard.double(forKey: "defaultFontSize") }
+        set { UserDefaults.standard.set(newValue, forKey: "defaultFontSize") }
+    }
+    var mirrorMode: Bool {
+        get { UserDefaults.standard.bool(forKey: "mirrorMode") }
+        set { UserDefaults.standard.set(newValue, forKey: "mirrorMode") }
+    }
+    var defaultSpeechRate: Double {
+        get { UserDefaults.standard.double(forKey: "defaultSpeechRate") == 0 ? 0.5 : UserDefaults.standard.double(forKey: "defaultSpeechRate") }
+        set { UserDefaults.standard.set(newValue, forKey: "defaultSpeechRate") }
+    }
+    var defaultSpeechPitch: Double {
+        get { UserDefaults.standard.double(forKey: "defaultSpeechPitch") == 0 ? 1.0 : UserDefaults.standard.double(forKey: "defaultSpeechPitch") }
+        set { UserDefaults.standard.set(newValue, forKey: "defaultSpeechPitch") }
+    }
+    var defaultVoiceIdentifier: String {
+        get { UserDefaults.standard.string(forKey: "defaultVoiceIdentifier") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "defaultVoiceIdentifier") }
+    }
 }

@@ -1,10 +1,11 @@
 // ScriptStore.swift
 import Foundation
-import Combine
+import Observation
 
-final class ScriptStore: ObservableObject {
+@Observable
+final class ScriptStore {
 
-    @Published private(set) var scripts: [Script] = []
+    private(set) var scripts: [Script] = []
 
     private let parser = ScriptParser()
     private let fileManager = FileManager.default
@@ -17,9 +18,7 @@ final class ScriptStore: ObservableObject {
         documentsURL.appendingPathComponent("\(id.uuidString).json")
     }
 
-    init() {
-        loadAll()
-    }
+    init() { loadAll() }
 
     @discardableResult
     func createScript(title: String, rawText: String) -> Script {
@@ -41,16 +40,10 @@ final class ScriptStore: ObservableObject {
     }
 
     func update(_ script: Script) {
-        let updated = Script(
-            id: script.id,
-            title: script.title,
-            rawText: script.rawText,
-            lines: script.lines,
-            scenes: script.scenes,
-            characters: script.characters,
-            createdAt: script.createdAt,
-            updatedAt: Date()
-        )
+        let updated = Script(id: script.id, title: script.title, rawText: script.rawText,
+                             lines: script.lines, scenes: script.scenes,
+                             characters: script.characters, createdAt: script.createdAt,
+                             updatedAt: Date())
         save(updated)
         if let idx = scripts.firstIndex(where: { $0.id == script.id }) {
             scripts[idx] = updated
@@ -63,27 +56,18 @@ final class ScriptStore: ObservableObject {
     }
 
     private func save(_ script: Script) {
-        let url = fileURL(for: script.id)
-        do {
-            let data = try JSONEncoder().encode(script)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            print("[ScriptStore] Save failed: \(error)")
+        if let data = try? JSONEncoder().encode(script) {
+            try? data.write(to: fileURL(for: script.id), options: .atomic)
         }
     }
 
     private func loadAll() {
         guard let urls = try? fileManager.contentsOfDirectory(
-            at: documentsURL, includingPropertiesForKeys: nil
-        ) else { return }
-
-        scripts = urls
-            .filter { $0.pathExtension == "json" }
-            .compactMap { url -> Script? in
-                guard let data = try? Data(contentsOf: url),
-                      let script = try? JSONDecoder().decode(Script.self, from: data)
-                else { return nil }
-                return script
+            at: documentsURL, includingPropertiesForKeys: nil) else { return }
+        scripts = urls.filter { $0.pathExtension == "json" }
+            .compactMap { url in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? JSONDecoder().decode(Script.self, from: data)
             }
             .sorted { $0.updatedAt > $1.updatedAt }
     }

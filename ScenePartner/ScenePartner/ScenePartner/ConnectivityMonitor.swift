@@ -1,15 +1,15 @@
 // ConnectivityMonitor.swift
 import Foundation
 import Network
+import Observation
 
-final class ConnectivityMonitor: ObservableObject {
+@Observable
+final class ConnectivityMonitor {
 
-    @Published private(set) var isConnected: Bool = false
-    @Published private(set) var connectionType: ConnectionType = .none
+    private(set) var isConnected: Bool = false
+    private(set) var connectionType: ConnectionType = .none
 
-    enum ConnectionType {
-        case none, wifi, cellular, wired, other
-    }
+    enum ConnectionType { case none, wifi, cellular, wired, other }
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.scenepartner.connectivity")
@@ -24,9 +24,7 @@ final class ConnectivityMonitor: ObservableObject {
         monitor.start(queue: queue)
     }
 
-    deinit {
-        monitor.cancel()
-    }
+    deinit { monitor.cancel() }
 
     private static func type(from path: NWPath) -> ConnectionType {
         if path.usesInterfaceType(.wifi) { return .wifi }
