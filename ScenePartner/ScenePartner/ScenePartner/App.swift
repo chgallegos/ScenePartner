@@ -8,7 +8,7 @@ struct ScenePartnerMain: App {
     @StateObject private var connectivity = ConnectivityMonitor()
     @StateObject private var settings = AppSettings()
 
-    var body: WindowGroup<ContentView> {
+    var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(scriptStore)

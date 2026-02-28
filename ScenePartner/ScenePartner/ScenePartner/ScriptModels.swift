@@ -6,7 +6,7 @@ import Foundation
 // MARK: - Line
 
 /// The atomic unit of a script. Every parsed element becomes a Line.
-struct Line: Identifiable, Codable, Equatable {
+struct Line: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     var index: Int              // Global, 0-based position in the flat script
     var speaker: String?        // nil for non-dialogue types
@@ -14,7 +14,7 @@ struct Line: Identifiable, Codable, Equatable {
     var type: LineType
     var sceneIndex: Int?        // Which scene this line belongs to
 
-    enum LineType: String, Codable {
+    enum LineType: String, Codable, Hashable {
         case dialogue           // A character speaks
         case stageDirection     // Parenthetical or bracket notes
         case sceneHeading       // SCENE 1, INT. KITCHEN, etc.
@@ -33,7 +33,7 @@ struct Line: Identifiable, Codable, Equatable {
 
 // MARK: - Scene
 
-struct Scene: Identifiable, Codable, Equatable {
+struct Scene: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     var index: Int              // 0-based scene order
     var heading: String         // Display heading extracted from script
@@ -64,7 +64,7 @@ struct Character: Identifiable, Codable, Equatable, Hashable {
 // MARK: - Script
 
 /// The top-level container persisted to disk.
-struct Script: Identifiable, Codable, Equatable {
+struct Script: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     var title: String
     var rawText: String         // Original pasted / imported text — kept for re-parsing
@@ -118,7 +118,7 @@ struct RehearsalState: Equatable {
 
 /// Parameters that influence TTS delivery. ToneEngine merges AI suggestions
 /// with local defaults to produce this struct.
-struct VoiceProfile: Codable, Equatable {
+struct VoiceProfile: Codable, Equatable, Hashable {
     var voiceIdentifier: String?    // BCP-47 or AVSpeechSynthesisVoice identifier
     var rate: Float                 // 0.0–1.0 (AVSpeechUtterance scale)
     var pitch: Float                // 0.5–2.0
