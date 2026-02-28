@@ -130,7 +130,7 @@ struct VoiceProfile: Codable, Equatable, Hashable {
         rate: 0.50,
         pitch: 1.0,
         volume: 1.0,
-        pauseAfterMs: 300
+        pauseAfterMs: 150
     )
 }
 

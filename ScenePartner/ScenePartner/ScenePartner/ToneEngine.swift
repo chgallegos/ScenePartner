@@ -11,14 +11,14 @@ final class ToneEngine {
 
     /// Adjustments applied on top of VoiceProfile.default for each tone tag.
     private static let toneAdjustments: [String: VoiceProfile] = [
-        "tense": VoiceProfile(voiceIdentifier: nil, rate: 0.55, pitch: 1.1, volume: 1.0, pauseAfterMs: 200),
-        "playful": VoiceProfile(voiceIdentifier: nil, rate: 0.58, pitch: 1.2, volume: 0.9, pauseAfterMs: 250),
-        "intimate": VoiceProfile(voiceIdentifier: nil, rate: 0.42, pitch: 0.95, volume: 0.75, pauseAfterMs: 500),
-        "angry": VoiceProfile(voiceIdentifier: nil, rate: 0.60, pitch: 1.15, volume: 1.0, pauseAfterMs: 150),
-        "sad": VoiceProfile(voiceIdentifier: nil, rate: 0.38, pitch: 0.85, volume: 0.7, pauseAfterMs: 600),
-        "comedic": VoiceProfile(voiceIdentifier: nil, rate: 0.62, pitch: 1.25, volume: 0.95, pauseAfterMs: 200),
-        "mysterious": VoiceProfile(voiceIdentifier: nil, rate: 0.40, pitch: 0.90, volume: 0.65, pauseAfterMs: 700),
-        "urgent": VoiceProfile(voiceIdentifier: nil, rate: 0.65, pitch: 1.1, volume: 1.0, pauseAfterMs: 100),
+        "tense": VoiceProfile(voiceIdentifier: nil, rate: 0.55, pitch: 1.1, volume: 1.0, pauseAfterMs: 50),
+        "playful": VoiceProfile(voiceIdentifier: nil, rate: 0.58, pitch: 1.2, volume: 0.9, pauseAfterMs: 120),
+        "intimate": VoiceProfile(voiceIdentifier: nil, rate: 0.42, pitch: 0.95, volume: 0.75, pauseAfterMs: 200),
+        "angry": VoiceProfile(voiceIdentifier: nil, rate: 0.60, pitch: 1.15, volume: 1.0, pauseAfterMs: 80),
+        "sad": VoiceProfile(voiceIdentifier: nil, rate: 0.38, pitch: 0.85, volume: 0.7, pauseAfterMs: 250),
+        "comedic": VoiceProfile(voiceIdentifier: nil, rate: 0.62, pitch: 1.25, volume: 0.95, pauseAfterMs: 50),
+        "mysterious": VoiceProfile(voiceIdentifier: nil, rate: 0.40, pitch: 0.90, volume: 0.65, pauseAfterMs: 300),
+        "urgent": VoiceProfile(voiceIdentifier: nil, rate: 0.65, pitch: 1.1, volume: 1.0, pauseAfterMs: 50),
     ]
 
     // MARK: - Public API

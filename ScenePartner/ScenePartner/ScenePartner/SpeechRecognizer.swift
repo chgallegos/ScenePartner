@@ -1,7 +1,4 @@
 // SpeechRecognizer.swift
-// ScenePartner — Offline speech recognition using SFSpeechRecognizer.
-// Listens for the user speaking their line and calls completion when done.
-
 import Foundation
 import Speech
 import AVFoundation
@@ -20,15 +17,17 @@ final class SpeechRecognizer: ObservableObject {
     private var silenceTimer: Timer?
     private var onComplete: ((String) -> Void)?
 
-    // How long to wait after speech stops before auto-advancing (seconds)
-    private let silenceThreshold: TimeInterval = 1.5
+    // Tight silence detection — feels human, not robotic
+    // 0.6s: enough to catch natural pauses mid-sentence without cutting off
+    private let silenceThreshold: TimeInterval = 0.6
+
+    // Max listen time before giving up
+    private let maxListenTime: TimeInterval = 30.0
 
     init() {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
         requestPermission()
     }
-
-    // MARK: - Permissions
 
     func requestPermission() {
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
@@ -38,19 +37,11 @@ final class SpeechRecognizer: ObservableObject {
         }
     }
 
-    // MARK: - Listen
-
-    /// Start listening. Calls completion with transcribed text after silence.
     func startListening(completion: @escaping (String) -> Void) {
-        guard permissionGranted else {
-            requestPermission()
-            return
-        }
+        guard permissionGranted else { requestPermission(); return }
         guard !isListening else { return }
-
         onComplete = completion
         transcribedText = ""
-
         do {
             try startAudioEngine()
             isListening = true
@@ -71,10 +62,7 @@ final class SpeechRecognizer: ObservableObject {
         isListening = false
     }
 
-    // MARK: - Audio Engine
-
     private func startAudioEngine() throws {
-        // Configure audio session for recording while allowing playback
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .measurement,
                                 options: [.duckOthers, .allowBluetooth])
@@ -83,12 +71,10 @@ final class SpeechRecognizer: ObservableObject {
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
         guard let recognitionRequest else { return }
         recognitionRequest.shouldReportPartialResults = true
-        // Use on-device recognition — works offline
         recognitionRequest.requiresOnDeviceRecognition = true
 
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
-
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
         }
@@ -98,34 +84,29 @@ final class SpeechRecognizer: ObservableObject {
 
         recognitionTask = recognizer?.recognitionTask(with: recognitionRequest) { [weak self] result, error in
             guard let self else { return }
-
             if let result {
                 let text = result.bestTranscription.formattedString
                 Task { @MainActor in
                     self.transcribedText = text
-                    // Reset silence timer on each new word
+                    // Every new word resets the silence timer — tight and responsive
                     self.resetSilenceTimer()
                 }
             }
-
-            if error != nil || (result?.isFinal == true) {
-                Task { @MainActor in
-                    self.finishListening()
-                }
+            if error != nil || result?.isFinal == true {
+                Task { @MainActor in self.finishListening() }
             }
         }
 
-        // Start silence timer — if user doesn't speak within 8s, give up
-        resetSilenceTimer(initial: true)
+        // Start max-time safety timer
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: maxListenTime, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.finishListening() }
+        }
     }
 
-    private func resetSilenceTimer(initial: Bool = false) {
+    private func resetSilenceTimer() {
         silenceTimer?.invalidate()
-        let timeout = initial ? 8.0 : silenceThreshold
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
-            Task { @MainActor in
-                self?.finishListening()
-            }
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceThreshold, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.finishListening() }
         }
     }
 
