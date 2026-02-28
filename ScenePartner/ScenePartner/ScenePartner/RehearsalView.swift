@@ -9,14 +9,28 @@ struct RehearsalView: View {
     @StateObject private var engine: RehearsalEngine
     @StateObject private var teleprompter = TeleprompterEngine()
     @EnvironmentObject private var connectivity: ConnectivityMonitor
+    @EnvironmentObject private var settings: AppSettings
     @State private var showScenePicker = false
 
     init(script: Script, userCharacters: Set<String>, isImprovMode: Bool) {
         self.script = script
         self.userCharacters = userCharacters
         self.isImprovMode = isImprovMode
+
+        // Pick voice engine: ElevenLabs if key exists + online, else AVSpeech
+        let settings = AppSettings()
+        let voiceEngine: VoiceEngineProtocol
+        if !settings.elevenLabsAPIKey.isEmpty && settings.useAIVoice {
+            voiceEngine = ElevenLabsVoiceEngine(
+                apiKey: settings.elevenLabsAPIKey,
+                voiceID: settings.elevenLabsVoiceID
+            )
+        } else {
+            voiceEngine = SpeechManager()
+        }
+
         _engine = StateObject(wrappedValue: RehearsalEngine(
-            script: script, voiceEngine: SpeechManager(), toneEngine: ToneEngine()))
+            script: script, voiceEngine: voiceEngine, toneEngine: ToneEngine()))
     }
 
     var body: some View {
@@ -24,7 +38,6 @@ struct RehearsalView: View {
             TeleprompterView(script: script, engine: engine,
                              teleprompter: teleprompter, userCharacters: userCharacters)
                 .frame(maxHeight: .infinity)
-
             Divider()
             statusStrip.padding(.horizontal).padding(.vertical, 8)
             Divider()
@@ -48,7 +61,6 @@ struct RehearsalView: View {
 
     private var statusStrip: some View {
         HStack(spacing: 12) {
-            // Main status
             Group {
                 switch engine.state.status {
                 case .idle:
@@ -74,10 +86,17 @@ struct RehearsalView: View {
 
             Spacer()
 
-            // Listen mode indicator
-            Button {
-                engine.toggleListenMode()
-            } label: {
+            // AI voice indicator
+            if settings.useAIVoice && !settings.elevenLabsAPIKey.isEmpty {
+                Label("AI Voice", systemImage: "brain")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.purple)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color.purple.opacity(0.12)).clipShape(Capsule())
+            }
+
+            // Listen mode toggle
+            Button { engine.toggleListenMode() } label: {
                 Label(engine.listenModeEnabled ? "Listen" : "Tap",
                       systemImage: engine.listenModeEnabled ? "mic.fill" : "hand.tap")
                     .font(.caption.weight(.medium))
@@ -85,13 +104,6 @@ struct RehearsalView: View {
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(engine.listenModeEnabled ? Color.red.opacity(0.12) : Color.secondary.opacity(0.12))
                     .clipShape(Capsule())
-            }
-
-            if engine.state.isImprovModeOn {
-                Label("IMPROV", systemImage: "wand.and.stars")
-                    .font(.caption.weight(.bold)).foregroundStyle(.orange)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.15)).clipShape(Capsule())
             }
         }
     }
@@ -118,11 +130,9 @@ struct RehearsalView: View {
                     .foregroundStyle(.white)
             }
 
-            // Next — always available as manual fallback
             Button { engine.advance() } label: {
                 Image(systemName: "forward.end.fill").font(.title2)
-            }
-            .disabled(engine.state.status != .waitingForUser)
+            }.disabled(engine.state.status != .waitingForUser)
         }
     }
 
@@ -132,8 +142,6 @@ struct RehearsalView: View {
         default: return "pause.fill"
         }
     }
-
-    // MARK: - Toolbar
 
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
@@ -153,8 +161,6 @@ struct RehearsalView: View {
         }
     }
 }
-
-// MARK: - ScenePickerView
 
 struct ScenePickerView: View {
     let script: Script

@@ -5,46 +5,105 @@ import AVFoundation
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var availableVoices: [AVSpeechSynthesisVoice] = []
+    @State private var showAPIKey = false
 
     var body: some View {
         Form {
+            // MARK: - AI Voice
+            Section {
+                Toggle("Use AI Voice (ElevenLabs)", isOn: $settings.useAIVoice)
+
+                if settings.useAIVoice {
+                    HStack {
+                        if showAPIKey {
+                            TextField("API Key", text: $settings.elevenLabsAPIKey)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .font(.system(.body, design: .monospaced))
+                        } else {
+                            SecureField("API Key", text: $settings.elevenLabsAPIKey)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                        Button {
+                            showAPIKey.toggle()
+                        } label: {
+                            Image(systemName: showAPIKey ? "eye.slash" : "eye")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if settings.elevenLabsAPIKey.isEmpty {
+                        Label("Get a free API key at elevenlabs.io", systemImage: "info.circle")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Label("AI voice active — partner will sound human", systemImage: "checkmark.circle.fill")
+                            .font(.caption).foregroundStyle(.green)
+                    }
+
+                    // Voice picker
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Partner Voice").font(.caption).foregroundStyle(.secondary)
+                        Picker("Voice", selection: $settings.elevenLabsVoiceID) {
+                            Text("Daniel (deep, clear)").tag(ElevenLabsVoiceEngine.defaultVoiceID)
+                            Text("Bella (warm, natural)").tag(ElevenLabsVoiceEngine.femaleVoiceID)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+                }
+            } header: {
+                Text("AI Voice")
+            } footer: {
+                Text("When enabled, the partner's lines are spoken by a neural AI voice. Falls back to device TTS when offline.")
+                    .font(.caption)
+            }
+
+            // MARK: - Privacy
             Section("Privacy") {
                 Toggle("Local Only Mode", isOn: $settings.localOnlyMode)
                 if settings.localOnlyMode {
-                    Label("All AI features disabled.", systemImage: "lock.fill")
+                    Label("All network calls disabled.", systemImage: "lock.fill")
                         .font(.caption).foregroundStyle(.orange)
                 }
             }
-            if !settings.localOnlyMode {
-                Section("Online Features") {
-                    Toggle("Tone Analysis", isOn: $settings.toneAnalysisEnabled)
-                    Toggle("Coaching Feedback", isOn: $settings.coachingEnabled)
-                }
-            }
+
+            // MARK: - Teleprompter
             Section("Teleprompter") {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text("Font Size"); Spacer()
-                        Text("\(Int(settings.defaultFontSize))pt").foregroundStyle(.secondary) }
+                    HStack {
+                        Text("Font Size"); Spacer()
+                        Text("\(Int(settings.defaultFontSize))pt").foregroundStyle(.secondary)
+                    }
                     Slider(value: $settings.defaultFontSize, in: 14...72, step: 1)
                 }
                 Toggle("Mirror Mode", isOn: $settings.mirrorMode)
             }
-            Section("Voice") {
+
+            // MARK: - Fallback Voice
+            Section("Fallback Voice (Offline)") {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text("Speech Rate"); Spacer()
-                        Text(String(format: "%.2f", settings.defaultSpeechRate)).foregroundStyle(.secondary) }
+                    HStack {
+                        Text("Speech Rate"); Spacer()
+                        Text(String(format: "%.2f", settings.defaultSpeechRate)).foregroundStyle(.secondary)
+                    }
                     Slider(value: $settings.defaultSpeechRate, in: 0.1...0.9, step: 0.05)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack { Text("Pitch"); Spacer()
-                        Text(String(format: "%.1f", settings.defaultSpeechPitch)).foregroundStyle(.secondary) }
+                    HStack {
+                        Text("Pitch"); Spacer()
+                        Text(String(format: "%.1f", settings.defaultSpeechPitch)).foregroundStyle(.secondary)
+                    }
                     Slider(value: $settings.defaultSpeechPitch, in: 0.5...2.0, step: 0.1)
                 }
             }
+
+            // MARK: - About
             Section("About") {
-                HStack { Text("Version"); Spacer()
+                HStack {
+                    Text("Version"); Spacer()
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                        .foregroundStyle(.secondary) }
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .navigationTitle("Settings")
