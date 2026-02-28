@@ -1,27 +1,27 @@
 // App.swift
+// Note: Xcode 26 beta / Swift 6 requires concrete return type instead of 'some Scene'
 import SwiftUI
 
 @main
 struct ScenePartnerMain: App {
-
-    @StateObject private var scriptStore = ScriptStore()
-    @StateObject private var connectivity = ConnectivityMonitor()
-    @StateObject private var settings = AppSettings()
-
-    var body: some Scene {
+    var body: WindowGroup<AppRootView> {
         WindowGroup {
-            ContentView()
-                .environmentObject(scriptStore)
-                .environmentObject(connectivity)
-                .environmentObject(settings)
+            AppRootView()
         }
     }
 }
 
-struct ContentView: View {
+struct AppRootView: View {
+    @StateObject private var scriptStore = ScriptStore()
+    @StateObject private var connectivity = ConnectivityMonitor()
+    @StateObject private var settings = AppSettings()
+
     var body: some View {
         NavigationStack {
             ScriptListView()
         }
+        .environmentObject(scriptStore)
+        .environmentObject(connectivity)
+        .environmentObject(settings)
     }
 }
