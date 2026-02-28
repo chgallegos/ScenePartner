@@ -158,7 +158,7 @@ final class RehearsalEngine: ObservableObject {
         #if targetEnvironment(simulator)
         print("[RehearsalEngine] Simulator detected — listen mode disabled, use tap to advance")
         return
-        #endif
+        #else
 
         guard speechRecognizer.permissionGranted else {
             speechRecognizer.requestPermission()
@@ -175,6 +175,7 @@ final class RehearsalEngine: ObservableObject {
                 self.moveToNextLine()
             }
         }
+        #endif
     }
 
     private func moveToNextLine() {

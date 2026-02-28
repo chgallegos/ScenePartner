@@ -18,11 +18,16 @@ struct Take: Identifiable, Equatable {
 
     var displayName: String { "Take \(number)" }
     var formattedDuration: String {
+        // Read duration from file metadata without async call
         let asset = AVURLAsset(url: url)
-        // Use synchronous duration access (deprecated but needed in non-async context)
-        let duration = asset.duration
-        guard duration.isValid && !duration.isIndefinite else { return "" }
-        let secs = Int(duration.seconds)
+        var secs = 0
+        // timeRange from tracks is synchronous on iOS 16+
+        if let track = asset.tracks(withMediaType: .video).first {
+            let dur = track.timeRange.duration
+            if dur.isValid && !dur.isIndefinite {
+                secs = Int(dur.seconds)
+            }
+        }
         return String(format: "%d:%02d", secs / 60, secs % 60)
     }
 }

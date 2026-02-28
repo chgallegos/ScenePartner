@@ -106,7 +106,6 @@ struct RoleSelectionView: View {
                     sceneDirection: $sceneDirection
                 ) {
                     showDirection = false
-                    navigateToRehearsal = true
                 }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
