@@ -17,11 +17,7 @@ final class SpeechRecognizer: ObservableObject {
     private var silenceTimer: Timer?
     private var onComplete: ((String) -> Void)?
 
-    // Tight silence detection — feels human, not robotic
-    // 0.6s: enough to catch natural pauses mid-sentence without cutting off
     private let silenceThreshold: TimeInterval = 0.6
-
-    // Max listen time before giving up
     private let maxListenTime: TimeInterval = 30.0
 
     init() {
@@ -47,25 +43,37 @@ final class SpeechRecognizer: ObservableObject {
             isListening = true
         } catch {
             print("[SpeechRecognizer] Failed to start: \(error)")
+            // Fall through gracefully — tap-to-advance still works
         }
     }
 
     func stopListening() {
         silenceTimer?.invalidate()
         silenceTimer = nil
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
+        if audioEngine.isRunning {
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
         recognitionRequest = nil
         recognitionTask = nil
         isListening = false
+        // Restore audio session for TTS playback
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio,
+                                                          options: [.duckOthers])
     }
 
     private func startAudioEngine() throws {
+        // Reset engine if needed
+        if audioEngine.isRunning {
+            audioEngine.stop()
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
+
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .measurement,
-                                options: [.duckOthers, .allowBluetooth])
+                                options: [.duckOthers, .defaultToSpeaker])
         try session.setActive(true, options: .notifyOthersOnDeactivation)
 
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
@@ -74,8 +82,10 @@ final class SpeechRecognizer: ObservableObject {
         recognitionRequest.requiresOnDeviceRecognition = true
 
         let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+        // Use the input node's NATIVE format — avoids sample rate mismatch crash
+        let recordingFormat = inputNode.inputFormat(forBus: 0)
+
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
         }
 
@@ -88,7 +98,6 @@ final class SpeechRecognizer: ObservableObject {
                 let text = result.bestTranscription.formattedString
                 Task { @MainActor in
                     self.transcribedText = text
-                    // Every new word resets the silence timer — tight and responsive
                     self.resetSilenceTimer()
                 }
             }
@@ -97,7 +106,7 @@ final class SpeechRecognizer: ObservableObject {
             }
         }
 
-        // Start max-time safety timer
+        // Safety timeout
         silenceTimer = Timer.scheduledTimer(withTimeInterval: maxListenTime, repeats: false) { [weak self] _ in
             Task { @MainActor in self?.finishListening() }
         }
