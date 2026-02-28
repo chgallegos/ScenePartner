@@ -12,7 +12,9 @@ struct RehearsalView: View {
     @State private var showScenePicker = false
 
     init(script: Script, userCharacters: Set<String>, isImprovMode: Bool) {
-        self.script = script; self.userCharacters = userCharacters; self.isImprovMode = isImprovMode
+        self.script = script
+        self.userCharacters = userCharacters
+        self.isImprovMode = isImprovMode
         _engine = StateObject(wrappedValue: RehearsalEngine(
             script: script, voiceEngine: SpeechManager(), toneEngine: ToneEngine()))
     }
@@ -22,12 +24,14 @@ struct RehearsalView: View {
             TeleprompterView(script: script, engine: engine,
                              teleprompter: teleprompter, userCharacters: userCharacters)
                 .frame(maxHeight: .infinity)
+
             Divider()
             statusStrip.padding(.horizontal).padding(.vertical, 8)
             Divider()
             controlBar.padding(.horizontal).padding(.vertical, 12).background(.ultraThinMaterial)
         }
-        .navigationTitle(script.title).navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(script.title)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarItems }
         .sheet(isPresented: $showScenePicker) {
             ScenePickerView(script: script) { engine.jump(to: $0); showScenePicker = false }
@@ -40,31 +44,59 @@ struct RehearsalView: View {
         .onChange(of: engine.state.currentLineIndex) { _, i in teleprompter.setFocus(to: i) }
     }
 
+    // MARK: - Status Strip
+
     private var statusStrip: some View {
-        HStack {
+        HStack(spacing: 12) {
+            // Main status
             Group {
                 switch engine.state.status {
-                case .idle: Text("Ready")
+                case .idle:
+                    Text("Ready")
                 case .playingPartner:
-                    Label(engine.currentLine?.speaker ?? "Partner", systemImage: "waveform").foregroundStyle(.blue)
+                    Label(engine.currentLine?.speaker ?? "Partner", systemImage: "waveform")
+                        .foregroundStyle(.blue)
                 case .waitingForUser:
-                    Label("Your line — tap Next", systemImage: "hand.tap").foregroundStyle(.green)
-                case .paused: Label("Paused", systemImage: "pause.fill").foregroundStyle(.orange)
-                case .finished: Label("Scene complete!", systemImage: "checkmark.circle.fill").foregroundStyle(.purple)
+                    if engine.isListeningForUser {
+                        Label("Speak your line...", systemImage: "mic.fill")
+                            .foregroundStyle(.red)
+                    } else {
+                        Label("Your line — tap Next", systemImage: "hand.tap")
+                            .foregroundStyle(.green)
+                    }
+                case .paused:
+                    Label("Paused", systemImage: "pause.fill").foregroundStyle(.orange)
+                case .finished:
+                    Label("Scene complete!", systemImage: "checkmark.circle.fill").foregroundStyle(.purple)
                 }
-            }.font(.caption.weight(.medium))
+            }
+            .font(.caption.weight(.medium))
+
             Spacer()
+
+            // Listen mode indicator
+            Button {
+                engine.toggleListenMode()
+            } label: {
+                Label(engine.listenModeEnabled ? "Listen" : "Tap",
+                      systemImage: engine.listenModeEnabled ? "mic.fill" : "hand.tap")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(engine.listenModeEnabled ? .red : .secondary)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(engine.listenModeEnabled ? Color.red.opacity(0.12) : Color.secondary.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
             if engine.state.isImprovModeOn {
                 Label("IMPROV", systemImage: "wand.and.stars")
                     .font(.caption.weight(.bold)).foregroundStyle(.orange)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(Color.orange.opacity(0.15)).clipShape(Capsule())
-            }
-            if !connectivity.isConnected {
-                Image(systemName: "wifi.slash").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
+
+    // MARK: - Control Bar
 
     private var controlBar: some View {
         HStack(spacing: 32) {
@@ -86,9 +118,11 @@ struct RehearsalView: View {
                     .foregroundStyle(.white)
             }
 
+            // Next — always available as manual fallback
             Button { engine.advance() } label: {
                 Image(systemName: "forward.end.fill").font(.title2)
-            }.disabled(engine.state.status != .waitingForUser)
+            }
+            .disabled(engine.state.status != .waitingForUser)
         }
     }
 
@@ -98,6 +132,8 @@ struct RehearsalView: View {
         default: return "pause.fill"
         }
     }
+
+    // MARK: - Toolbar
 
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
@@ -117,6 +153,8 @@ struct RehearsalView: View {
         }
     }
 }
+
+// MARK: - ScenePickerView
 
 struct ScenePickerView: View {
     let script: Script

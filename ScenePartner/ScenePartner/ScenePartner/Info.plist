@@ -2,9 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-	</array>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>ScenePartner listens to your lines so it can automatically advance to the next cue when you finish speaking.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>ScenePartner uses speech recognition to detect when you have finished delivering your line.</string>
 </dict>
 </plist>

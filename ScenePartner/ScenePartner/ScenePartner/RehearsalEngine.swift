@@ -6,6 +6,7 @@ import Combine
 final class RehearsalEngine: ObservableObject {
 
     @Published private(set) var state: RehearsalState = RehearsalState()
+    @Published private(set) var isListeningForUser = false
 
     var currentLine: Line? {
         guard state.currentLineIndex < script.lines.count else { return nil }
@@ -15,13 +16,18 @@ final class RehearsalEngine: ObservableObject {
     private(set) var script: Script
     private let voiceEngine: VoiceEngineProtocol
     private let toneEngine: ToneEngine
+    private let speechRecognizer: SpeechRecognizer
     private var toneAnalysis: ToneAnalysis?
+
+    // Whether listen mode is active
+    var listenModeEnabled: Bool = true
 
     init(script: Script, voiceEngine: VoiceEngineProtocol, toneEngine: ToneEngine,
          toneAnalysis: ToneAnalysis? = nil) {
         self.script = script
         self.voiceEngine = voiceEngine
         self.toneEngine = toneEngine
+        self.speechRecognizer = SpeechRecognizer()
         self.toneAnalysis = toneAnalysis
     }
 
@@ -30,8 +36,9 @@ final class RehearsalEngine: ObservableObject {
     }
 
     func setImprovMode(_ on: Bool) { state.isImprovModeOn = on }
-
     func injectToneAnalysis(_ analysis: ToneAnalysis) { toneAnalysis = analysis }
+
+    // MARK: - Controls
 
     func start(from index: Int = 0) {
         guard state.status == .idle || state.status == .finished else { return }
@@ -45,6 +52,8 @@ final class RehearsalEngine: ObservableObject {
         guard state.status == .playingPartner || state.status == .waitingForUser else { return }
         let previous = state.status
         state.status = .paused
+        speechRecognizer.stopListening()
+        isListeningForUser = false
         if previous == .playingPartner { voiceEngine.pause() }
     }
 
@@ -55,16 +64,22 @@ final class RehearsalEngine: ObservableObject {
             voiceEngine.resume()
         } else {
             state.status = .waitingForUser
+            startListeningIfEnabled()
         }
     }
 
+    /// Manual tap-to-advance (fallback when listen mode is off or times out)
     func advance() {
         guard state.status == .waitingForUser else { return }
+        speechRecognizer.stopListening()
+        isListeningForUser = false
         markCurrentLineDone()
         moveToNextLine()
     }
 
     func back() {
+        speechRecognizer.stopListening()
+        isListeningForUser = false
         voiceEngine.stop()
         state.currentLineIndex = previousDialogueIndex(before: state.currentLineIndex)
         state.status = .idle
@@ -73,6 +88,8 @@ final class RehearsalEngine: ObservableObject {
 
     func jump(to index: Int) {
         guard index >= 0 && index < script.lines.count else { return }
+        speechRecognizer.stopListening()
+        isListeningForUser = false
         voiceEngine.stop()
         state.currentLineIndex = index
         state.status = .idle
@@ -80,9 +97,21 @@ final class RehearsalEngine: ObservableObject {
     }
 
     func stop() {
+        speechRecognizer.stopListening()
+        isListeningForUser = false
         voiceEngine.stop()
         state.status = .idle
         state.currentLineIndex = 0
+    }
+
+    func toggleListenMode() {
+        listenModeEnabled.toggle()
+        if !listenModeEnabled {
+            speechRecognizer.stopListening()
+            isListeningForUser = false
+        } else if state.status == .waitingForUser {
+            startListeningIfEnabled()
+        }
     }
 
     // MARK: - State Machine
@@ -98,7 +127,10 @@ final class RehearsalEngine: ObservableObject {
             moveToNextLine()
         case .dialogue:
             if isPartnerLine(line) { speakPartnerLine(line) }
-            else { state.status = .waitingForUser }
+            else {
+                state.status = .waitingForUser
+                startListeningIfEnabled()
+            }
         }
     }
 
@@ -109,10 +141,26 @@ final class RehearsalEngine: ObservableObject {
         let profile = toneEngine.profile(for: speaker, sceneTones: tones, analysis: toneAnalysis)
 
         voiceEngine.speak(text: line.text, profile: profile) { [weak self] in
-            // Dispatch back to MainActor since the completion fires from a background queue
             Task { @MainActor [weak self] in
                 self?.markCurrentLineDone()
                 self?.moveToNextLine()
+            }
+        }
+    }
+
+    private func startListeningIfEnabled() {
+        guard listenModeEnabled else { return }
+        guard speechRecognizer.permissionGranted else {
+            speechRecognizer.requestPermission()
+            return
+        }
+        isListeningForUser = true
+        speechRecognizer.startListening { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.state.status == .waitingForUser else { return }
+                self.isListeningForUser = false
+                self.markCurrentLineDone()
+                self.moveToNextLine()
             }
         }
     }
