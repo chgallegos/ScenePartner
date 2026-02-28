@@ -1,19 +1,15 @@
 // ScriptStore.swift
 import Foundation
-import Observation
+import Combine
 
-@Observable
-final class ScriptStore {
-
-    private(set) var scripts: [Script] = []
-
+final class ScriptStore: ObservableObject {
+    @Published private(set) var scripts: [Script] = []
     private let parser = ScriptParser()
     private let fileManager = FileManager.default
 
     private var documentsURL: URL {
         fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
-
     private func fileURL(for id: UUID) -> URL {
         documentsURL.appendingPathComponent("\(id.uuidString).json")
     }
@@ -23,31 +19,12 @@ final class ScriptStore {
     @discardableResult
     func createScript(title: String, rawText: String) -> Script {
         var script = parser.parse(rawText: rawText, title: title)
-        script = Script(
-            id: script.id,
-            title: title.isEmpty ? "Untitled Script" : title,
-            rawText: rawText,
-            lines: script.lines,
-            scenes: script.scenes,
-            characters: script.characters,
-            createdAt: Date(),
-            updatedAt: Date()
-        )
-        save(script)
-        scripts.append(script)
+        script = Script(id: script.id, title: title.isEmpty ? "Untitled Script" : title,
+                        rawText: rawText, lines: script.lines, scenes: script.scenes,
+                        characters: script.characters, createdAt: Date(), updatedAt: Date())
+        save(script); scripts.append(script)
         scripts.sort { $0.updatedAt > $1.updatedAt }
         return script
-    }
-
-    func update(_ script: Script) {
-        let updated = Script(id: script.id, title: script.title, rawText: script.rawText,
-                             lines: script.lines, scenes: script.scenes,
-                             characters: script.characters, createdAt: script.createdAt,
-                             updatedAt: Date())
-        save(updated)
-        if let idx = scripts.firstIndex(where: { $0.id == script.id }) {
-            scripts[idx] = updated
-        }
     }
 
     func delete(_ script: Script) {
@@ -68,7 +45,6 @@ final class ScriptStore {
             .compactMap { url in
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return try? JSONDecoder().decode(Script.self, from: data)
-            }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            }.sorted { $0.updatedAt > $1.updatedAt }
     }
 }

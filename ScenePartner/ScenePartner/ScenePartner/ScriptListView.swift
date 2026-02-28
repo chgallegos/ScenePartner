@@ -3,61 +3,44 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ScriptListView: View {
-
-    @Environment(ScriptStore.self) private var store
-    @Environment(ConnectivityMonitor.self) private var connectivity
-
+    @EnvironmentObject private var store: ScriptStore
+    @EnvironmentObject private var connectivity: ConnectivityMonitor
     @State private var showAddSheet = false
     @State private var showImportPicker = false
 
     var body: some View {
         Group {
-            if store.scripts.isEmpty {
-                emptyState
-            } else {
+            if store.scripts.isEmpty { emptyState }
+            else {
                 List {
                     ForEach(store.scripts) { script in
-                        NavigationLink(value: script) {
-                            ScriptRowView(script: script)
-                        }
+                        NavigationLink(value: script) { ScriptRowView(script: script) }
                     }
-                    .onDelete { offsets in
-                        offsets.forEach { store.delete(store.scripts[$0]) }
-                    }
+                    .onDelete { offsets in offsets.forEach { store.delete(store.scripts[$0]) } }
                 }
             }
         }
         .navigationTitle("My Scripts")
-        .navigationDestination(for: Script.self) { script in
-            RoleSelectionView(script: script)
-        }
+        .navigationDestination(for: Script.self) { RoleSelectionView(script: $0) }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Menu {
                     Button("Paste Script", systemImage: "doc.text") { showAddSheet = true }
                     Button("Import .txt File", systemImage: "folder") { showImportPicker = true }
-                } label: {
-                    Image(systemName: "plus")
-                }
+                } label: { Image(systemName: "plus") }
             }
             ToolbarItem(placement: .navigationBarLeading) {
-                NavigationLink(destination: SettingsView()) {
-                    Image(systemName: "gear")
-                }
+                NavigationLink(destination: SettingsView()) { Image(systemName: "gear") }
             }
         }
         .sheet(isPresented: $showAddSheet) { AddScriptView() }
-        .fileImporter(isPresented: $showImportPicker,
-                      allowedContentTypes: [.plainText],
+        .fileImporter(isPresented: $showImportPicker, allowedContentTypes: [.plainText],
                       allowsMultipleSelection: false) { handleImport($0) }
         .overlay(alignment: .bottom) {
             if !connectivity.isConnected {
                 Label("Offline — core rehearsal available", systemImage: "wifi.slash")
-                    .font(.caption)
-                    .padding(.horizontal, 16).padding(.vertical, 8)
-                    .background(.regularMaterial)
-                    .clipShape(Capsule())
-                    .padding(.bottom, 8)
+                    .font(.caption).padding(.horizontal, 16).padding(.vertical, 8)
+                    .background(.regularMaterial).clipShape(Capsule()).padding(.bottom, 8)
             }
         }
     }
@@ -91,15 +74,13 @@ struct ScriptRowView: View {
                 Label("\(script.lines.filter { $0.type == .dialogue }.count) lines", systemImage: "text.bubble")
                 Label("\(script.scenes.count) scenes", systemImage: "film")
                 Label("\(script.characters.count) chars", systemImage: "person.2")
-            }
-            .font(.caption).foregroundStyle(.secondary)
-        }
-        .padding(.vertical, 4)
+            }.font(.caption).foregroundStyle(.secondary)
+        }.padding(.vertical, 4)
     }
 }
 
 struct AddScriptView: View {
-    @Environment(ScriptStore.self) private var store
+    @EnvironmentObject private var store: ScriptStore
     @Environment(\.dismiss) private var dismiss
     @State private var title = ""
     @State private var rawText = ""
@@ -109,21 +90,18 @@ struct AddScriptView: View {
             Form {
                 Section("Title") { TextField("e.g. Romeo & Juliet Act II", text: $title) }
                 Section("Script") {
-                    TextEditor(text: $rawText)
-                        .frame(minHeight: 300)
+                    TextEditor(text: $rawText).frame(minHeight: 300)
                         .font(.system(.body, design: .monospaced))
                 }
             }
-            .navigationTitle("New Script")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("New Script").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         store.createScript(title: title.isEmpty ? "Untitled" : title, rawText: rawText)
                         dismiss()
-                    }
-                    .disabled(rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }.disabled(rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

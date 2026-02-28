@@ -2,26 +2,19 @@
 import SwiftUI
 
 struct RehearsalView: View {
-
     let script: Script
     let userCharacters: Set<String>
     let isImprovMode: Bool
 
     @StateObject private var engine: RehearsalEngine
     @StateObject private var teleprompter = TeleprompterEngine()
-
-    @Environment(ConnectivityMonitor.self) private var connectivity
+    @EnvironmentObject private var connectivity: ConnectivityMonitor
     @State private var showScenePicker = false
 
     init(script: Script, userCharacters: Set<String>, isImprovMode: Bool) {
-        self.script = script
-        self.userCharacters = userCharacters
-        self.isImprovMode = isImprovMode
+        self.script = script; self.userCharacters = userCharacters; self.isImprovMode = isImprovMode
         _engine = StateObject(wrappedValue: RehearsalEngine(
-            script: script,
-            voiceEngine: SpeechManager(),
-            toneEngine: ToneEngine()
-        ))
+            script: script, voiceEngine: SpeechManager(), toneEngine: ToneEngine()))
     }
 
     var body: some View {
@@ -34,23 +27,17 @@ struct RehearsalView: View {
             Divider()
             controlBar.padding(.horizontal).padding(.vertical, 12).background(.ultraThinMaterial)
         }
-        .navigationTitle(script.title)
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(script.title).navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarItems }
         .sheet(isPresented: $showScenePicker) {
-            ScenePickerView(script: script) { lineIndex in
-                engine.jump(to: lineIndex)
-                showScenePicker = false
-            }
+            ScenePickerView(script: script) { engine.jump(to: $0); showScenePicker = false }
         }
         .onAppear {
             engine.setUserCharacters(userCharacters)
             engine.setImprovMode(isImprovMode)
             if engine.state.status == .idle { engine.start() }
         }
-        .onChange(of: engine.state.currentLineIndex) { _, newIndex in
-            teleprompter.setFocus(to: newIndex)
-        }
+        .onChange(of: engine.state.currentLineIndex) { _, i in teleprompter.setFocus(to: i) }
     }
 
     private var statusStrip: some View {
@@ -62,13 +49,10 @@ struct RehearsalView: View {
                     Label(engine.currentLine?.speaker ?? "Partner", systemImage: "waveform").foregroundStyle(.blue)
                 case .waitingForUser:
                     Label("Your line — tap Next", systemImage: "hand.tap").foregroundStyle(.green)
-                case .paused:
-                    Label("Paused", systemImage: "pause.fill").foregroundStyle(.orange)
-                case .finished:
-                    Label("Scene complete!", systemImage: "checkmark.circle.fill").foregroundStyle(.purple)
+                case .paused: Label("Paused", systemImage: "pause.fill").foregroundStyle(.orange)
+                case .finished: Label("Scene complete!", systemImage: "checkmark.circle.fill").foregroundStyle(.purple)
                 }
-            }
-            .font(.caption.weight(.medium))
+            }.font(.caption.weight(.medium))
             Spacer()
             if engine.state.isImprovModeOn {
                 Label("IMPROV", systemImage: "wand.and.stars")
