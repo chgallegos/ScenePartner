@@ -18,7 +18,10 @@ struct Take: Identifiable, Equatable {
 
     var displayName: String { "Take \(number)" }
     var formattedDuration: String {
-        guard let duration = try? AVURLAsset(url: url).load(.duration) else { return "" }
+        let asset = AVURLAsset(url: url)
+        // Use synchronous duration access (deprecated but needed in non-async context)
+        let duration = asset.duration
+        guard duration.isValid && !duration.isIndefinite else { return "" }
         let secs = Int(duration.seconds)
         return String(format: "%d:%02d", secs / 60, secs % 60)
     }
