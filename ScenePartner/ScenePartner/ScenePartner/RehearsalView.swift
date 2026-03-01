@@ -17,6 +17,7 @@ struct RehearsalView: View {
         self.script = script
         self.userCharacters = userCharacters
         self.isImprovMode = isImprovMode
+        self.sceneDirection = sceneDirection
 
         let settings = AppSettings()
         let voiceEngine: VoiceEngineProtocol
