@@ -77,40 +77,74 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
     // This is the key technique: we wrap the text with emotional stage direction
     // that the model reads as performance instruction
 
+    // MARK: - Inline Emotion Injection
+    // eleven_multilingual_v2 responds to acting notes placed BEFORE the line in brackets.
+    // e.g. "[whispering, desperate] I had to." sounds fundamentally different from just "I had to."
+    // We build a specific, actor-friendly note from the direction the user set.
+
     private func injectEmotionalContext(into text: String) -> String {
+        let note = buildActingNote()
+        guard !note.isEmpty else {
+            print("[ElevenLabs] 🎭 No direction — speaking as written")
+            return text
+        }
+
+        let injected = "[\(note)] \(text)"
+        print("""
+        [ElevenLabs] 🎭 Injecting acting note:
+          Note: [\(note)]
+          Line: "\(text.prefix(60))"
+          Full: "\(injected.prefix(80))"
+          Model: \(model) | stability:\(stabilityFromDirection()) style:\(styleFromDirection()) speed:\(speedFromDirection())
+        """)
+        return injected
+    }
+
+    private func buildActingNote() -> String {
+        let tones = allTones()
         let state = allEmotionalStates()
         let objective = allObjectives()
-        let tones = allTones()
 
-        // Build a performance instruction prefix
-        var instructions: [String] = []
+        var parts: [String] = []
 
+        // 1. Physical/vocal delivery cue from tone
+        if let deliveryCue = deliveryCue(from: tones) {
+            parts.append(deliveryCue)
+        }
+
+        // 2. Emotional state (most important — use as-is if set)
         if !state.isEmpty {
-            instructions.append(state)
+            parts.append(state)
         }
+
+        // 3. Subtext / want
         if !objective.isEmpty {
-            instructions.append("wanting \(objective)")
-        }
-        if !tones.isEmpty {
-            let toneStr = tones.prefix(2).joined(separator: ", ")
-            instructions.append(toneStr)
+            parts.append("trying to \(objective)")
         }
 
-        guard !instructions.isEmpty else { return text }
+        return parts.joined(separator: ", ")
+    }
 
-        // Format as a natural acting note the model can interpret
-        let note = instructions.joined(separator: ", ")
-
-        // Log what we're actually sending
-        print("""
-        [ElevenLabs] 🎭 Emotional context: \(note)
-          Raw text: "\(text.prefix(60))"
-          Model: \(model)
-          Stability: \(stabilityFromDirection()) | Style: \(styleFromDirection())
-        """)
-
-        return text  // Text unchanged — emotion via voice_settings + model choice
-        // Future: return "<emotional_note>\(note)</emotional_note>\(text)" when ElevenLabs adds SSML
+    // Maps tone tags to specific vocal/physical acting instructions
+    // These are phrased the way a director would give notes to an actor
+    private func deliveryCue(from tones: [String]) -> String? {
+        // Priority order — most specific wins
+        if tones.contains("desperate")   { return "voice breaking, barely holding it together" }
+        if tones.contains("angry")       { return "jaw tight, controlled fury" }
+        if tones.contains("fearful")     { return "voice trembling, barely above a whisper" }
+        if tones.contains("vulnerable")  { return "raw, unguarded, voice soft" }
+        if tones.contains("intimate")    { return "low and close, speaking only to this person" }
+        if tones.contains("defiant")     { return "chin up, voice steady and hard" }
+        if tones.contains("bitter")      { return "cold, clipped, each word deliberate" }
+        if tones.contains("sad")         { return "heavy, slow, the weight of it showing" }
+        if tones.contains("hopeful")     { return "light, reaching, almost afraid to say it" }
+        if tones.contains("loving")      { return "warm, unhurried, meaning every word" }
+        if tones.contains("tense")       { return "guarded, measuring each word carefully" }
+        if tones.contains("urgent")      { return "rushed, no time, has to get this out" }
+        if tones.contains("mysterious")  { return "quiet and deliberate, revealing nothing" }
+        if tones.contains("playful")     { return "light, almost laughing, enjoying this" }
+        if tones.contains("comedic")     { return "dry delivery, barely containing amusement" }
+        return nil
     }
 
     // MARK: - API Call
