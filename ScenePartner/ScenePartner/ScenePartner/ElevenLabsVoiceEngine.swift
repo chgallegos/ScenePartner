@@ -49,7 +49,16 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
         }
     }
 
-    func stop()   { player?.pause(); player = nil; isPlaying = false; fallback.stop(); completionHandler = nil }
+    func stop() {
+        NotificationCenter.default.removeObserver(self,
+            name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+        player?.pause()
+        player = nil
+        playerItem = nil
+        isPlaying = false
+        fallback.stop()
+        completionHandler = nil
+    }
     func pause()  { player?.pause(); fallback.pause() }
     func resume() { player?.play(); fallback.resume() }
 
@@ -166,6 +175,11 @@ final class ElevenLabsVoiceEngine: NSObject, VoiceEngineProtocol, @unchecked Sen
     @objc private func playerDidFinish() {
         print("[ElevenLabs] ✅ Playback finished")
         isPlaying = false
+        // Remove observer BEFORE calling completion to avoid re-entrancy
+        NotificationCenter.default.removeObserver(self,
+            name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+        player = nil
+        playerItem = nil
         let handler = completionHandler
         completionHandler = nil
         DispatchQueue.main.async { handler?() }
