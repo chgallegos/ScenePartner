@@ -64,9 +64,7 @@ final class AdaptiveDirector: ObservableObject {
 
         do {
             let newDirection = try await fetchAdaptedDirection()
-            withAnimation(.easeInOut(duration: 0.5)) {
-                currentDirection = newDirection
-            }
+            currentDirection = newDirection
             print("[AdaptiveDirector] 🎭 Direction updated for \(characterName): \(newDirection.emotionalState)")
         } catch {
             print("[AdaptiveDirector] ⚠️ Analysis failed: \(error) — keeping current direction")

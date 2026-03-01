@@ -82,7 +82,12 @@ final class SpeechRecognizer: ObservableObject {
 
         if audioEngine.isRunning {
             audioEngine.stop()
-            audioEngine.inputNode.removeTap(onBus: 0)
+            // Remove tap on the correct queue to avoid crashes
+            DispatchQueue.main.async {
+                if self.audioEngine.inputNode.numberOfInputs > 0 {
+                    self.audioEngine.inputNode.removeTap(onBus: 0)
+                }
+            }
         }
         recognitionRequest?.endAudio()
         recognitionTask?.cancel()
@@ -91,10 +96,14 @@ final class SpeechRecognizer: ObservableObject {
         isListening = false
         audioLevel = 0
 
-        // Restore playback session
-        try? AVAudioSession.sharedInstance().setCategory(
-            .playback, mode: .spokenAudio, options: [.duckOthers])
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // Restore playback session — deactivate first to release mic
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("[SpeechRecognizer] ⚠️ Session restore error: \(error)")
+        }
     }
 
     private func startAudioEngine() throws {
