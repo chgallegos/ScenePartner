@@ -67,6 +67,33 @@ struct SettingsView: View {
             }
 
             // MARK: - Privacy
+            // MARK: - Adaptive Director
+            Section {
+                Toggle("Adaptive Direction", isOn: $settings.adaptiveDirectionEnabled)
+                if settings.adaptiveDirectionEnabled {
+                    HStack {
+                        SecureField("OpenAI API Key", text: $settings.openAIKey)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if !settings.openAIKey.isEmpty {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        }
+                    }
+                    if settings.openAIKey.isEmpty {
+                        Label("Get a key at platform.openai.com", systemImage: "info.circle")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Label("AI will evolve character direction as scene develops", systemImage: "brain")
+                            .font(.caption).foregroundStyle(.green)
+                    }
+                }
+            } header: {
+                Text("Adaptive Direction")
+            } footer: {
+                Text("Uses GPT-4o-mini to analyze the scene every 2 exchanges and update the partner's emotional delivery in real time.")
+                    .font(.caption)
+            }
+
             Section("Privacy") {
                 Toggle("Local Only Mode", isOn: $settings.localOnlyMode)
                 if settings.localOnlyMode {

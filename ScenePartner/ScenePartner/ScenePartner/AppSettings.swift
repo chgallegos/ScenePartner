@@ -13,4 +13,8 @@ final class AppSettings: ObservableObject {
     @AppStorage("elevenLabsAPIKey") var elevenLabsAPIKey: String = ""
     @AppStorage("elevenLabsVoiceID") var elevenLabsVoiceID: String = "onwK4e9ZLuTAKqWW03F9"
     @AppStorage("useAIVoice") var useAIVoice: Bool = false
+
+    // MARK: - Adaptive Director
+    @AppStorage("openAIKey") var openAIKey: String = ""
+    @AppStorage("adaptiveDirectionEnabled") var adaptiveDirectionEnabled: Bool = true
 }

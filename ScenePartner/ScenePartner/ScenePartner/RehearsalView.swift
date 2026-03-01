@@ -5,6 +5,7 @@ struct RehearsalView: View {
     let script: Script
     let userCharacters: Set<String>
     let isImprovMode: Bool
+    let sceneDirection: SceneDirection
 
     @StateObject private var engine: RehearsalEngine
     @StateObject private var teleprompter = TeleprompterEngine()
@@ -53,6 +54,13 @@ struct RehearsalView: View {
         .onAppear {
             engine.setUserCharacters(userCharacters)
             engine.setImprovMode(isImprovMode)
+            // Set up adaptive directors if OpenAI key available
+            if settings.adaptiveDirectionEnabled && !settings.openAIKey.isEmpty {
+                engine.setupAdaptiveDirectors(
+                    sceneDirection: sceneDirection,
+                    openAIKey: settings.openAIKey
+                )
+            }
             if engine.state.status == .idle { engine.start() }
         }
         .onChange(of: engine.state.currentLineIndex) { _, i in teleprompter.setFocus(to: i) }

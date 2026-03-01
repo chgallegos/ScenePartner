@@ -21,6 +21,7 @@ final class RehearsalEngine: ObservableObject {
     private let toneEngine: ToneEngine
     private let speechRecognizer: SpeechRecognizer
     private var toneAnalysis: ToneAnalysis?
+    private var adaptiveDirectors: [String: AdaptiveDirector] = [:]
 
     // Whether listen mode is active
     var listenModeEnabled: Bool = true
@@ -40,6 +41,23 @@ final class RehearsalEngine: ObservableObject {
 
     func setImprovMode(_ on: Bool) { state.isImprovModeOn = on }
     func injectToneAnalysis(_ analysis: ToneAnalysis) { toneAnalysis = analysis }
+
+    /// Call after setUserCharacters to set up adaptive directors for partner characters
+    func setupAdaptiveDirectors(sceneDirection: SceneDirection, openAIKey: String) {
+        guard !openAIKey.isEmpty else { return }
+        let partnerNames = script.characters
+            .map { $0.name }
+            .filter { !state.userCharacters.contains($0) }
+        for name in partnerNames {
+            let initialDir = sceneDirection.characterDirections[name] ?? .empty(for: name)
+            adaptiveDirectors[name] = AdaptiveDirector(
+                characterName: name,
+                initialDirection: initialDir,
+                openAIKey: openAIKey
+            )
+        }
+        print("[RehearsalEngine] 🧠 Adaptive directors set up for: \(partnerNames.joined(separator: ", "))")
+    }
 
     // MARK: - Controls
 
@@ -132,6 +150,10 @@ final class RehearsalEngine: ObservableObject {
             if isPartnerLine(line) { speakPartnerLine(line) }
             else {
                 state.status = .waitingForUser
+                // Record user's line text for adaptive analysis
+                for director in adaptiveDirectors.values {
+                    director.recordLine(speaker: line.speaker ?? "USER", text: line.text)
+                }
                 startListeningIfEnabled()
             }
         }
@@ -142,6 +164,17 @@ final class RehearsalEngine: ObservableObject {
         let speaker = line.speaker ?? "NARRATOR"
         let tones = toneAnalysis?.sceneTone ?? []
         let profile = toneEngine.profile(for: speaker, sceneTones: tones, analysis: toneAnalysis)
+
+        // Update ElevenLabs direction from adaptive director if available
+        if let director = adaptiveDirectors[speaker],
+           let el = voiceEngine as? ElevenLabsVoiceEngine {
+            var dir = el.sceneDirection
+            dir.characterDirections[speaker] = director.currentDirection
+            el.sceneDirection = dir
+        }
+
+        // Record this line for adaptive analysis
+        adaptiveDirectors[speaker]?.recordLine(speaker: speaker, text: line.text)
 
         voiceEngine.speak(text: line.text, profile: profile) { [weak self] in
             Task { @MainActor [weak self] in
