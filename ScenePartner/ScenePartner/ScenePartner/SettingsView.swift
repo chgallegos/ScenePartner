@@ -45,10 +45,18 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Partner Voice").font(.caption).foregroundStyle(.secondary)
                         Picker("Voice", selection: $settings.elevenLabsVoiceID) {
-                            Text("Daniel (deep, clear)").tag(ElevenLabsVoiceEngine.defaultVoiceID)
-                            Text("Bella (warm, natural)").tag(ElevenLabsVoiceEngine.femaleVoiceID)
+                            // Male voices
+                            Text("Daniel — deep, clear").tag("onwK4e9ZLuTAKqWW03F9")
+                            Text("Adam — dramatic, powerful").tag("pNInz6obpgDQGcFmaJgB")
+                            Text("Josh — warm, grounded").tag("TxGEqnHWrfWFTfGW9XjX")
+                            Text("Antoni — natural, conversational").tag("ErXwobaYiN019PkySvjV")
+                            // Female voices
+                            Text("Bella — warm, natural").tag("EXAVITQu4vr4xnSDxMaL")
+                            Text("Elli — emotional, expressive").tag("MF3mGyEYCl7XYWbV9V6O")
                         }
-                        .pickerStyle(.segmented)
+                        .pickerStyle(.navigationLink)
+                        Text("Try Adam or Elli for most emotional range.")
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
             } header: {
