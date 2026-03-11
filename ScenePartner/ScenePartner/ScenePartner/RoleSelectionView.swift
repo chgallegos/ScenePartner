@@ -126,7 +126,7 @@ struct RoleSelectionView: View {
                             Text("Rehearse").font(.headline)
                             Text(loadedSetups().isEmpty ? "AI voice mode" : "Hybrid mode active")
                                 .font(.caption)
-                                .foregroundStyle(loadedSetups().isEmpty ? .secondary : .indigo)
+                                .foregroundStyle(loadedSetups().isEmpty ? Color.secondary : Color.indigo)
                         }
                         Spacer()
                     }
