@@ -20,9 +20,10 @@ final class SpeechRecognizer: ObservableObject {
     private var hasHeardSpeech = false
 
     // After speech detected, wait this long after last word before advancing
-    private let silenceAfterSpeech: TimeInterval = 0.8
+    private let silenceAfterSpeech: TimeInterval = 0.4
     // If no speech heard at all within this time, give up
     private let maxSilenceBeforeSpeech: TimeInterval = 15.0
+    private var speechStartTime: Date? = nil
 
     init() {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
@@ -53,6 +54,7 @@ final class SpeechRecognizer: ObservableObject {
         onComplete = completion
         transcribedText = ""
         hasHeardSpeech = false
+        speechStartTime = nil
 
         do {
             try startAudioEngine()
@@ -157,7 +159,10 @@ final class SpeechRecognizer: ObservableObject {
                     Task { @MainActor in
                         print("[SpeechRecognizer] 💬 Heard: \"\(text)\"")
                         self.transcribedText = text
-                        self.hasHeardSpeech = true
+                        if !self.hasHeardSpeech {
+                            self.hasHeardSpeech = true
+                            self.speechStartTime = Date()
+                        }
                         self.resetSilenceTimer()
                     }
                 }
@@ -188,7 +193,10 @@ final class SpeechRecognizer: ObservableObject {
 
     private func resetSilenceTimer() {
         silenceTimer?.invalidate()
-        silenceTimer = Timer.scheduledTimer(withTimeInterval: silenceAfterSpeech, repeats: false) { [weak self] _ in
+        // If speech just started, give a little more grace time before cutting off
+        let elapsed = speechStartTime.map { Date().timeIntervalSince($0) } ?? 0
+        let delay = elapsed < 0.5 ? silenceAfterSpeech + 0.3 : silenceAfterSpeech
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 print("[SpeechRecognizer] ⏱️ Silence detected after speech — finishing")
                 self?.finishListening()

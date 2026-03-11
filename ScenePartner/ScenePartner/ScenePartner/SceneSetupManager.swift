@@ -166,7 +166,7 @@ final class SceneSetupManager: NSObject, ObservableObject {
         lineStatuses[lineIndex] = .converting
 
         guard !elevenLabsAPIKey.isEmpty else {
-            // No API key — use the raw recording directly
+            print("[SceneSetup] ⚠️ No ElevenLabs API key — using raw recording (no voice change)")
             let outputPath = saveRawRecording(from: url, lineIndex: lineIndex)
             setup.convertedAudioPaths[lineIndex] = outputPath
             lineStatuses[lineIndex] = .ready
@@ -181,10 +181,9 @@ final class SceneSetupManager: NSObject, ObservableObject {
             setup.convertedAudioPaths[lineIndex] = outputURL.path
             lineStatuses[lineIndex] = .ready
             saveSetup()
-            print("[SceneSetup] ✅ Line \(lineIndex) converted and saved")
+            print("[SceneSetup] ✅ Line \(lineIndex) voice-converted and saved (\(convertedData.count) bytes)")
         } catch {
-            print("[SceneSetup] ❌ Voice conversion failed for line \(lineIndex): \(error)")
-            // Fall back to raw recording
+            print("[SceneSetup] ❌ Voice conversion failed for line \(lineIndex): \(error) — falling back to raw audio")
             let outputPath = saveRawRecording(from: url, lineIndex: lineIndex)
             setup.convertedAudioPaths[lineIndex] = outputPath
             lineStatuses[lineIndex] = .ready
@@ -193,17 +192,25 @@ final class SceneSetupManager: NSObject, ObservableObject {
     }
 
     private func callVoiceChangerAPI(audioURL: URL) async throws -> Data {
-        let apiURL = URL(string: "https://api.elevenlabs.io/v1/speech-to-speech/\(targetVoiceID)")!
+        // Use a voice well-suited for emotional conversion
+        // Daniel (onwK4e9ZLuTAKqWW03F9) for male, Bella (EXAVITQu4vr4xnSDxMaL) for female
+        let conversionVoiceID = targetVoiceID.isEmpty ? "onwK4e9ZLuTAKqWW03F9" : targetVoiceID
+        let apiURL = URL(string: "https://api.elevenlabs.io/v1/speech-to-speech/\(conversionVoiceID)/stream")!
+
+        print("[SceneSetup] 🎙️ Calling Voice Changer API with voice: \(conversionVoiceID)")
 
         var request = URLRequest(url: apiURL)
         request.httpMethod = "POST"
         request.setValue(elevenLabsAPIKey, forHTTPHeaderField: "xi-api-key")
+        request.setValue("audio/mpeg", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 60
 
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let audioData = try Data(contentsOf: audioURL)
+        print("[SceneSetup] Audio size: \(audioData.count) bytes")
+
         var body = Data()
 
         // Audio file field
@@ -213,14 +220,14 @@ final class SceneSetupManager: NSObject, ObservableObject {
         body.append(audioData)
         body.append("\r\n".data(using: .utf8)!)
 
-        // Model ID
+        // Model - use multilingual for best emotional preservation
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"model_id\"\r\n\r\n".data(using: .utf8)!)
         body.append("eleven_english_sts_v2\r\n".data(using: .utf8)!)
 
-        // Voice settings - preserve emotion/timing from original
+        // Voice settings - high similarity to preserve emotional nuance
         let voiceSettings = """
-        {"stability": 0.3, "similarity_boost": 0.85, "style": 0.5, "use_speaker_boost": true}
+        {"stability": 0.25, "similarity_boost": 0.90, "style": 0.4, "use_speaker_boost": true}
         """
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"voice_settings\"\r\n\r\n".data(using: .utf8)!)
@@ -233,11 +240,11 @@ final class SceneSetupManager: NSObject, ObservableObject {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw VoiceConversionError.invalidResponse }
 
-        print("[SceneSetup] Voice Changer API: HTTP \(http.statusCode), \(data.count) bytes")
+        print("[SceneSetup] Voice Changer API: HTTP \(http.statusCode), \(data.count) bytes returned")
 
         guard (200..<300).contains(http.statusCode) else {
             let msg = String(data: data, encoding: .utf8) ?? "Unknown error"
-            print("[SceneSetup] ❌ API error: \(msg)")
+            print("[SceneSetup] ❌ API error \(http.statusCode): \(msg)")
             throw VoiceConversionError.apiError(http.statusCode, msg)
         }
 

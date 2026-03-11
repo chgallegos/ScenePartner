@@ -6,8 +6,6 @@ struct RoleSelectionView: View {
 
     @State private var selectedCharacters: Set<String> = []
     @State private var isImprovMode: Bool = false
-    @State private var sceneDirection = SceneDirection.empty
-    @State private var showDirection = false
     @State private var navigateToSetup = false
     @State private var sceneSetups: [String: SceneSetup] = [:]
 
@@ -46,27 +44,6 @@ struct RoleSelectionView: View {
                     Label("Partner may paraphrase. Disable to enforce script-only.", systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.orange)
                 }
-            }
-
-            Section {
-                Button {
-                    showDirection = true
-                } label: {
-                    HStack {
-                        Image(systemName: "theatermasks.fill")
-                            .foregroundStyle(.purple)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Set Character Direction")
-                                .font(.body.weight(.medium))
-                            Text(hasDirection ? "Direction set ✓" : "Give the AI emotional context")
-                                .font(.caption)
-                                .foregroundStyle(hasDirection ? .green : .secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.secondary).font(.caption)
-                    }
-                }
-                .disabled(selectedCharacters.isEmpty)
             }
 
             // MARK: - Hybrid Setup Section
@@ -116,7 +93,6 @@ struct RoleSelectionView: View {
                         script: script,
                         userCharacters: selectedCharacters,
                         isImprovMode: isImprovMode,
-                        sceneDirection: sceneDirection,
                         sceneSetups: loadedSetups()
                     )
                 ) {
@@ -139,7 +115,7 @@ struct RoleSelectionView: View {
                         script: script,
                         userCharacters: selectedCharacters,
                         isImprovMode: isImprovMode,
-                        sceneDirection: sceneDirection
+                        sceneDirection: .empty
                     )
                 ) {
                     HStack {
@@ -153,22 +129,6 @@ struct RoleSelectionView: View {
             }
         }
         .navigationTitle(script.title)
-        .sheet(isPresented: $showDirection) {
-            NavigationStack {
-                DirectionView(
-                    script: script,
-                    partnerCharacters: partnerCharacters,
-                    sceneDirection: $sceneDirection
-                ) {
-                    showDirection = false
-                }
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { showDirection = false }
-                    }
-                }
-            }
-        }
         .onAppear { loadExistingSetups() }
     }
 
@@ -213,11 +173,6 @@ struct RoleSelectionView: View {
             }
         }
         return result
-    }
-
-    private var hasDirection: Bool {
-        !sceneDirection.sceneContext.isEmpty ||
-        sceneDirection.characterDirections.values.contains { !$0.emotionalState.isEmpty }
     }
 
     private func toggle(_ name: String) {
