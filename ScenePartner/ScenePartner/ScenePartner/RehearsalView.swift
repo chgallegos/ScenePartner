@@ -6,6 +6,7 @@ struct RehearsalView: View {
     let userCharacters: Set<String>
     let isImprovMode: Bool
     let sceneDirection: SceneDirection
+    let sceneSetups: [String: SceneSetup]
 
     @StateObject private var engine: RehearsalEngine
     @StateObject private var teleprompter = TeleprompterEngine()
@@ -13,11 +14,13 @@ struct RehearsalView: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var showScenePicker = false
 
-    init(script: Script, userCharacters: Set<String>, isImprovMode: Bool, sceneDirection: SceneDirection = .empty) {
+    init(script: Script, userCharacters: Set<String>, isImprovMode: Bool,
+         sceneDirection: SceneDirection = .empty, sceneSetups: [String: SceneSetup] = [:]) {
         self.script = script
         self.userCharacters = userCharacters
         self.isImprovMode = isImprovMode
         self.sceneDirection = sceneDirection
+        self.sceneSetups = sceneSetups
 
         let settings = AppSettings()
         let voiceEngine: VoiceEngineProtocol
@@ -55,6 +58,8 @@ struct RehearsalView: View {
         .onAppear {
             engine.setUserCharacters(userCharacters)
             engine.setImprovMode(isImprovMode)
+            // Inject hybrid mode setups
+            engine.sceneSetups = sceneSetups
             // Set up adaptive directors if OpenAI key available
             if settings.adaptiveDirectionEnabled && !settings.openAIKey.isEmpty {
                 engine.setupAdaptiveDirectors(
@@ -106,8 +111,14 @@ struct RehearsalView: View {
 
             Spacer()
 
-            // AI voice indicator
-            if settings.useAIVoice && !settings.elevenLabsAPIKey.isEmpty {
+            // Hybrid mode indicator
+            if !sceneSetups.isEmpty {
+                Label("Hybrid", systemImage: "waveform.and.mic")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.indigo)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Color.indigo.opacity(0.12)).clipShape(Capsule())
+            } else if settings.useAIVoice && !settings.elevenLabsAPIKey.isEmpty {
                 Label("AI Voice", systemImage: "brain")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.purple)

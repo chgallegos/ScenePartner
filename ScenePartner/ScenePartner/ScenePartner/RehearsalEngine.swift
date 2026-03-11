@@ -1,6 +1,7 @@
 // RehearsalEngine.swift
 import Foundation
 import Combine
+import AVFoundation
 
 @MainActor
 final class RehearsalEngine: ObservableObject {
@@ -23,6 +24,11 @@ final class RehearsalEngine: ObservableObject {
     private var toneAnalysis: ToneAnalysis?
     private var adaptiveDirectors: [String: AdaptiveDirector] = [:]
 
+    // Hybrid mode: pre-recorded converted audio per character
+    var sceneSetups: [String: SceneSetup] = [:]  // characterName → SceneSetup
+    private var setupPlayer: AVPlayer?
+    private var setupPlayerItem: AVPlayerItem?
+
     // Whether listen mode is active
     var listenModeEnabled: Bool = true
 
@@ -33,6 +39,13 @@ final class RehearsalEngine: ObservableObject {
         self.toneEngine = toneEngine
         self.speechRecognizer = SpeechRecognizer()
         self.toneAnalysis = toneAnalysis
+    }
+
+    /// Returns true if there is pre-recorded setup audio for this line
+    func hasSetupAudio(for line: Line) -> Bool {
+        guard let speaker = line.speaker else { return false }
+        guard let setup = sceneSetups[speaker.uppercased()] else { return false }
+        return setup.convertedAudioPaths[line.index] != nil
     }
 
     func setUserCharacters(_ characters: Set<String>) {
@@ -121,6 +134,12 @@ final class RehearsalEngine: ObservableObject {
         speechRecognizer.stopListening()
         isListeningForUser = false
         voiceEngine.stop()
+        // Clean up setup audio player
+        NotificationCenter.default.removeObserver(self,
+            name: .AVPlayerItemDidPlayToEndTime, object: setupPlayerItem)
+        setupPlayer?.pause()
+        setupPlayer = nil
+        setupPlayerItem = nil
         state.status = .idle
         state.currentLineIndex = 0
     }
@@ -162,10 +181,19 @@ final class RehearsalEngine: ObservableObject {
     private func speakPartnerLine(_ line: Line) {
         state.status = .playingPartner
         let speaker = line.speaker ?? "NARRATOR"
+
+        // HYBRID MODE: use pre-recorded converted audio if available
+        if let setup = sceneSetups[speaker.uppercased()],
+           let path = setup.convertedAudioPaths[line.index] {
+            playSetupAudio(at: URL(fileURLWithPath: path))
+            adaptiveDirectors[speaker]?.recordLine(speaker: speaker, text: line.text)
+            return
+        }
+
+        // FALLBACK: standard TTS via ElevenLabs or system voice
         let tones = toneAnalysis?.sceneTone ?? []
         let profile = toneEngine.profile(for: speaker, sceneTones: tones, analysis: toneAnalysis)
 
-        // Update ElevenLabs direction from adaptive director if available
         if let director = adaptiveDirectors[speaker],
            let el = voiceEngine as? ElevenLabsVoiceEngine {
             var dir = el.sceneDirection
@@ -173,7 +201,6 @@ final class RehearsalEngine: ObservableObject {
             el.sceneDirection = dir
         }
 
-        // Record this line for adaptive analysis
         adaptiveDirectors[speaker]?.recordLine(speaker: speaker, text: line.text)
 
         voiceEngine.speak(text: line.text, profile: profile) { [weak self] in
@@ -181,6 +208,36 @@ final class RehearsalEngine: ObservableObject {
                 self?.markCurrentLineDone()
                 self?.moveToNextLine()
             }
+        }
+    }
+
+    private func playSetupAudio(at url: URL) {
+        NotificationCenter.default.removeObserver(self,
+            name: .AVPlayerItemDidPlayToEndTime, object: setupPlayerItem)
+        setupPlayer?.pause()
+
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+
+        setupPlayerItem = AVPlayerItem(url: url)
+        setupPlayer = AVPlayer(playerItem: setupPlayerItem)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(setupPlayerDidFinish),
+            name: .AVPlayerItemDidPlayToEndTime,
+            object: setupPlayerItem
+        )
+        setupPlayer?.play()
+        print("[RehearsalEngine] 🎭 Playing setup audio: \(url.lastPathComponent)")
+    }
+
+    @objc private func setupPlayerDidFinish() {
+        Task { @MainActor in
+            NotificationCenter.default.removeObserver(self,
+                name: .AVPlayerItemDidPlayToEndTime, object: setupPlayerItem)
+            setupPlayer = nil
+            setupPlayerItem = nil
+            markCurrentLineDone()
+            moveToNextLine()
         }
     }
 

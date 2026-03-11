@@ -1,0 +1,322 @@
+// SceneSetupManager.swift
+// Manages the "scene setup" phase: user records partner lines,
+// ElevenLabs Voice Changer converts them to a different voice.
+// Converted audio is saved locally and reused across rehearsal sessions.
+
+import Foundation
+import AVFoundation
+import Combine
+
+// MARK: - Models
+
+struct SceneSetup: Codable {
+    var scriptID: UUID
+    var characterName: String           // The partner character this setup is for
+    var convertedAudioPaths: [Int: String]  // lineIndex → local file path
+    var createdAt: Date
+
+    init(scriptID: UUID, characterName: String) {
+        self.scriptID = scriptID
+        self.characterName = characterName
+        self.convertedAudioPaths = [:]
+        self.createdAt = Date()
+    }
+
+    var isComplete: Bool { !convertedAudioPaths.isEmpty }
+}
+
+enum SetupLineStatus {
+    case pending
+    case recording
+    case recorded
+    case converting
+    case ready
+    case failed(String)
+}
+
+// MARK: - SceneSetupManager
+
+@MainActor
+final class SceneSetupManager: NSObject, ObservableObject {
+
+    // Published state
+    @Published private(set) var lineStatuses: [Int: SetupLineStatus] = [:]
+    @Published private(set) var isRecording = false
+    @Published private(set) var currentRecordingIndex: Int? = nil
+    @Published private(set) var audioLevel: Float = 0.0
+    @Published var setup: SceneSetup
+
+    // The partner lines we need to record
+    let partnerLines: [Line]
+    let characterName: String
+
+    private let elevenLabsAPIKey: String
+    private let targetVoiceID: String  // The voice to convert TO
+
+    private var audioRecorder: AVAudioRecorder?
+    private var levelTimer: Timer?
+    private var tempRecordingURL: URL?
+
+    // MARK: - Init
+
+    init(script: Script, characterName: String, elevenLabsAPIKey: String, targetVoiceID: String) {
+        self.characterName = characterName
+        self.elevenLabsAPIKey = elevenLabsAPIKey
+        self.targetVoiceID = targetVoiceID
+        self.partnerLines = script.lines.filter {
+            $0.type == .dialogue && $0.speaker?.uppercased() == characterName.uppercased()
+        }
+        self.setup = SceneSetup(scriptID: script.id, characterName: characterName)
+
+        super.init()
+
+        // Load any previously saved setup
+        if let saved = Self.loadSetup(scriptID: script.id, characterName: characterName) {
+            self.setup = saved
+            // Mark already-converted lines as ready
+            for (index, _) in saved.convertedAudioPaths {
+                lineStatuses[index] = .ready
+            }
+        }
+
+        // Mark remaining as pending
+        for line in partnerLines {
+            if lineStatuses[line.index] == nil {
+                lineStatuses[line.index] = .pending
+            }
+        }
+    }
+
+    // MARK: - Recording
+
+    func startRecording(lineIndex: Int) {
+        guard !isRecording else { return }
+
+        let url = tempAudioURL(for: lineIndex)
+        tempRecordingURL = url
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+        ]
+
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.record, mode: .default)
+            try AVAudioSession.sharedInstance().setActive(true)
+            audioRecorder = try AVAudioRecorder(url: url, settings: settings)
+            audioRecorder?.isMeteringEnabled = true
+            audioRecorder?.record()
+            isRecording = true
+            currentRecordingIndex = lineIndex
+            lineStatuses[lineIndex] = .recording
+
+            // Level metering timer
+            levelTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.audioRecorder?.updateMeters()
+                    let power = self?.audioRecorder?.averagePower(forChannel: 0) ?? -60
+                    // Convert dB to 0-1 range
+                    let normalized = max(0, (power + 60) / 60)
+                    self?.audioLevel = normalized
+                }
+            }
+        } catch {
+            lineStatuses[lineIndex] = .failed("Could not start recording: \(error.localizedDescription)")
+        }
+    }
+
+    func stopRecordingAndConvert(lineIndex: Int) {
+        guard isRecording, let recordingURL = tempRecordingURL else { return }
+
+        levelTimer?.invalidate()
+        levelTimer = nil
+        audioRecorder?.stop()
+        audioRecorder = nil
+        isRecording = false
+        currentRecordingIndex = nil
+        audioLevel = 0.0
+
+        try? AVAudioSession.sharedInstance().setActive(false)
+
+        lineStatuses[lineIndex] = .recorded
+
+        // Convert via ElevenLabs Voice Changer
+        Task {
+            await convertRecording(at: recordingURL, lineIndex: lineIndex)
+        }
+    }
+
+    func cancelRecording(lineIndex: Int) {
+        levelTimer?.invalidate()
+        levelTimer = nil
+        audioRecorder?.stop()
+        audioRecorder = nil
+        isRecording = false
+        currentRecordingIndex = nil
+        audioLevel = 0.0
+        lineStatuses[lineIndex] = .pending
+        try? AVAudioSession.sharedInstance().setActive(false)
+    }
+
+    // MARK: - Voice Conversion
+
+    private func convertRecording(at url: URL, lineIndex: Int) async {
+        lineStatuses[lineIndex] = .converting
+
+        guard !elevenLabsAPIKey.isEmpty else {
+            // No API key — use the raw recording directly
+            let outputPath = saveRawRecording(from: url, lineIndex: lineIndex)
+            setup.convertedAudioPaths[lineIndex] = outputPath
+            lineStatuses[lineIndex] = .ready
+            saveSetup()
+            return
+        }
+
+        do {
+            let convertedData = try await callVoiceChangerAPI(audioURL: url)
+            let outputURL = convertedAudioURL(for: lineIndex)
+            try convertedData.write(to: outputURL)
+            setup.convertedAudioPaths[lineIndex] = outputURL.path
+            lineStatuses[lineIndex] = .ready
+            saveSetup()
+            print("[SceneSetup] ✅ Line \(lineIndex) converted and saved")
+        } catch {
+            print("[SceneSetup] ❌ Voice conversion failed for line \(lineIndex): \(error)")
+            // Fall back to raw recording
+            let outputPath = saveRawRecording(from: url, lineIndex: lineIndex)
+            setup.convertedAudioPaths[lineIndex] = outputPath
+            lineStatuses[lineIndex] = .ready
+            saveSetup()
+        }
+    }
+
+    private func callVoiceChangerAPI(audioURL: URL) async throws -> Data {
+        let apiURL = URL(string: "https://api.elevenlabs.io/v1/speech-to-speech/\(targetVoiceID)")!
+
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        request.setValue(elevenLabsAPIKey, forHTTPHeaderField: "xi-api-key")
+        request.timeoutInterval = 60
+
+        let boundary = UUID().uuidString
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        let audioData = try Data(contentsOf: audioURL)
+        var body = Data()
+
+        // Audio file field
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"audio\"; filename=\"recording.m4a\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/mp4\r\n\r\n".data(using: .utf8)!)
+        body.append(audioData)
+        body.append("\r\n".data(using: .utf8)!)
+
+        // Model ID
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"model_id\"\r\n\r\n".data(using: .utf8)!)
+        body.append("eleven_english_sts_v2\r\n".data(using: .utf8)!)
+
+        // Voice settings - preserve emotion/timing from original
+        let voiceSettings = """
+        {"stability": 0.3, "similarity_boost": 0.85, "style": 0.5, "use_speaker_boost": true}
+        """
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"voice_settings\"\r\n\r\n".data(using: .utf8)!)
+        body.append(voiceSettings.data(using: .utf8)!)
+        body.append("\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw VoiceConversionError.invalidResponse }
+
+        print("[SceneSetup] Voice Changer API: HTTP \(http.statusCode), \(data.count) bytes")
+
+        guard (200..<300).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? "Unknown error"
+            print("[SceneSetup] ❌ API error: \(msg)")
+            throw VoiceConversionError.apiError(http.statusCode, msg)
+        }
+
+        return data
+    }
+
+    // MARK: - Playback helper
+
+    func audioURL(for lineIndex: Int) -> URL? {
+        guard let path = setup.convertedAudioPaths[lineIndex] else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    // MARK: - Computed
+
+    var allLinesReady: Bool {
+        partnerLines.allSatisfy { line in
+            if case .ready = lineStatuses[line.index] ?? .pending { return true }
+            return false
+        }
+    }
+
+    var readyCount: Int {
+        partnerLines.filter { line in
+            if case .ready = lineStatuses[line.index] ?? .pending { return true }
+            return false
+        }.count
+    }
+
+    // MARK: - Persistence
+
+    private func saveRawRecording(from url: URL, lineIndex: Int) -> String {
+        let outputURL = convertedAudioURL(for: lineIndex)
+        try? FileManager.default.copyItem(at: url, to: outputURL)
+        return outputURL.path
+    }
+
+    private func tempAudioURL(for lineIndex: Int) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("scene_setup_temp_\(lineIndex).m4a")
+    }
+
+    private func convertedAudioURL(for lineIndex: Int) -> URL {
+        Self.setupDirectory(scriptID: setup.scriptID, characterName: characterName)
+            .appendingPathComponent("line_\(lineIndex).mp3")
+    }
+
+    private static func setupDirectory(scriptID: UUID, characterName: String) -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let dir = docs.appendingPathComponent("SceneSetups/\(scriptID.uuidString)/\(characterName)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private static func setupMetaURL(scriptID: UUID, characterName: String) -> URL {
+        setupDirectory(scriptID: scriptID, characterName: characterName)
+            .appendingPathComponent("setup.json")
+    }
+
+    func saveSetup() {
+        let url = Self.setupMetaURL(scriptID: setup.scriptID, characterName: characterName)
+        if let data = try? JSONEncoder().encode(setup) {
+            try? data.write(to: url)
+        }
+    }
+
+    static func loadSetup(scriptID: UUID, characterName: String) -> SceneSetup? {
+        let url = setupMetaURL(scriptID: scriptID, characterName: characterName)
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(SceneSetup.self, from: data)
+    }
+
+    static func deleteSetup(scriptID: UUID, characterName: String) {
+        let dir = setupDirectory(scriptID: scriptID, characterName: characterName)
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    enum VoiceConversionError: Error {
+        case invalidResponse
+        case apiError(Int, String)
+    }
+}

@@ -8,9 +8,20 @@ struct RoleSelectionView: View {
     @State private var isImprovMode: Bool = false
     @State private var sceneDirection = SceneDirection.empty
     @State private var showDirection = false
+    @State private var navigateToSetup = false
+    @State private var sceneSetups: [String: SceneSetup] = [:]
+
+    @EnvironmentObject private var settings: AppSettings
 
     var partnerCharacters: [Character] {
         script.characters.filter { !selectedCharacters.contains($0.name) }
+    }
+
+    /// Check if setups already exist for all partner characters
+    var existingSetupCount: Int {
+        partnerCharacters.filter { char in
+            SceneSetupManager.loadSetup(scriptID: script.id, characterName: char.name) != nil
+        }.count
     }
 
     var body: some View {
@@ -38,7 +49,6 @@ struct RoleSelectionView: View {
             }
 
             Section {
-                // Direction button
                 Button {
                     showDirection = true
                 } label: {
@@ -59,6 +69,46 @@ struct RoleSelectionView: View {
                 .disabled(selectedCharacters.isEmpty)
             }
 
+            // MARK: - Hybrid Setup Section
+            Section {
+                NavigationLink(
+                    destination: setupDestination,
+                    isActive: $navigateToSetup
+                ) { EmptyView() }.hidden()
+
+                Button {
+                    loadExistingSetups()
+                    navigateToSetup = true
+                } label: {
+                    HStack {
+                        Image(systemName: "waveform.and.mic")
+                            .foregroundStyle(.indigo)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Record Partner Lines")
+                                .font(.body.weight(.medium))
+                            Group {
+                                if existingSetupCount > 0 {
+                                    Text("\(existingSetupCount) of \(partnerCharacters.count) character(s) recorded ✓")
+                                        .foregroundStyle(.green)
+                                } else {
+                                    Text("Your emotion, their voice — best results")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .font(.caption)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").foregroundStyle(.secondary).font(.caption)
+                    }
+                }
+                .disabled(selectedCharacters.isEmpty)
+            } header: {
+                Text("Hybrid Rehearsal")
+            } footer: {
+                Text("Record the partner's lines yourself with the right emotion. The app converts your voice to sound like a different person.")
+                    .font(.caption)
+            }
+
             Section {
                 // Rehearse button
                 NavigationLink(
@@ -66,14 +116,19 @@ struct RoleSelectionView: View {
                         script: script,
                         userCharacters: selectedCharacters,
                         isImprovMode: isImprovMode,
-                        sceneDirection: sceneDirection
+                        sceneDirection: sceneDirection,
+                        sceneSetups: loadedSetups()
                     )
                 ) {
                     HStack {
                         Image(systemName: "play.fill").foregroundStyle(.blue)
-                        Text("Rehearse").font(.headline)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Rehearse").font(.headline)
+                            Text(loadedSetups().isEmpty ? "AI voice mode" : "Hybrid mode active")
+                                .font(.caption)
+                                .foregroundStyle(loadedSetups().isEmpty ? .secondary : .indigo)
+                        }
                         Spacer()
-                        Text("Practice mode").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .disabled(selectedCharacters.isEmpty)
@@ -114,6 +169,50 @@ struct RoleSelectionView: View {
                 }
             }
         }
+        .onAppear { loadExistingSetups() }
+    }
+
+    // MARK: - Setup Destination
+
+    @ViewBuilder
+    private var setupDestination: some View {
+        if let firstPartner = partnerCharacters.first {
+            SceneSetupView(
+                script: script,
+                characterName: firstPartner.name,
+                elevenLabsAPIKey: settings.elevenLabsAPIKey,
+                targetVoiceID: settings.elevenLabsVoiceID,
+                onComplete: { setup in
+                    sceneSetups[firstPartner.name.uppercased()] = setup
+                    navigateToSetup = false
+                },
+                onSkip: {
+                    navigateToSetup = false
+                }
+            )
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func loadExistingSetups() {
+        for char in partnerCharacters {
+            if let setup = SceneSetupManager.loadSetup(scriptID: script.id, characterName: char.name) {
+                sceneSetups[char.name.uppercased()] = setup
+            }
+        }
+    }
+
+    private func loadedSetups() -> [String: SceneSetup] {
+        // Merge in-memory setups with any saved ones
+        var result = sceneSetups
+        for char in partnerCharacters {
+            if result[char.name.uppercased()] == nil,
+               let saved = SceneSetupManager.loadSetup(scriptID: script.id, characterName: char.name) {
+                result[char.name.uppercased()] = saved
+            }
+        }
+        return result
     }
 
     private var hasDirection: Bool {
