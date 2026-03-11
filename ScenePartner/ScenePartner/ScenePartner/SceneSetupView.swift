@@ -220,7 +220,7 @@ struct CharacterSetupPage: View {
         .confirmationDialog("Reset all recordings for \(character.name)?",
             isPresented: $showConfirmReset, titleVisibility: .visible) {
             Button("Reset", role: .destructive) {
-                SceneSetupManager.deleteSetup(scriptID: script.id, characterName: character.name)
+                mgr.resetAll()
                 currentLinePos = 0
             }
             Button("Cancel", role: .cancel) {}

@@ -337,9 +337,36 @@ final class SceneSetupManager: NSObject, ObservableObject {
         setupDirectory(scriptID: scriptID, characterName: characterName)
             .appendingPathComponent("line_\(lineIndex).mp3")
     }
+
+
+    /// Deletes all files and resets in-memory state completely
+    func resetAll() {
+        // Stop any active recording first
+        if isRecording {
+            levelTimer?.invalidate()
+            levelTimer = nil
+            audioRecorder?.stop()
+            audioRecorder = nil
+            isRecording = false
+            currentRecordingIndex = nil
+            audioLevel = 0
+            try? AVAudioSession.sharedInstance().setActive(false)
+        }
+        // Delete all files on disk
+        Self.deleteSetup(scriptID: setup.scriptID, characterName: characterName)
+        // Reset all in-memory state
+        setup = SceneSetup(scriptID: setup.scriptID, characterName: characterName)
+        for line in partnerLines {
+            lineStatuses[line.index] = .pending
+        }
+        print("[SceneSetup] ✅ Reset complete for \(characterName) — all lines marked pending")
+    }
+
+    func saveSetup() {
         let url = Self.setupMetaURL(scriptID: setup.scriptID, characterName: characterName)
         if let data = try? JSONEncoder().encode(setup) {
             try? data.write(to: url)
+            print("[SceneSetup] 💾 Saved setup.json for \(characterName)")
         }
     }
 
@@ -351,7 +378,16 @@ final class SceneSetupManager: NSObject, ObservableObject {
 
     static func deleteSetup(scriptID: UUID, characterName: String) {
         let dir = setupDirectory(scriptID: scriptID, characterName: characterName)
-        try? FileManager.default.removeItem(at: dir)
+        do {
+            if FileManager.default.fileExists(atPath: dir.path) {
+                try FileManager.default.removeItem(at: dir)
+                print("[SceneSetup] 🗑️ Deleted all recordings for \(characterName)")
+            } else {
+                print("[SceneSetup] ⚠️ Nothing to delete for \(characterName) — directory didn't exist")
+            }
+        } catch {
+            print("[SceneSetup] ❌ Failed to delete recordings for \(characterName): \(error)")
+        }
     }
 
     enum VoiceConversionError: Error {
