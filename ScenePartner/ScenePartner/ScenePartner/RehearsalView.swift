@@ -72,8 +72,6 @@ struct RehearsalView: View {
         .onChange(of: engine.state.currentLineIndex) { _, i in teleprompter.setFocus(to: i) }
     }
 
-    // MARK: - Status Strip
-
     private var statusStrip: some View {
         HStack(spacing: 12) {
             Group {
@@ -87,18 +85,19 @@ struct RehearsalView: View {
                     if engine.isListeningForUser {
                         HStack(spacing: 8) {
                             Image(systemName: "mic.fill").foregroundStyle(.red)
-                            Text("Speak your line...").foregroundStyle(.red)
-                            // Live audio level meter
+                            Text("Your line...").foregroundStyle(.red)
+                            // Live audio meter
                             HStack(spacing: 2) {
-                                ForEach(0..<8, id: \.self) { i in
+                                ForEach(0..<12, id: \.self) { i in
                                     RoundedRectangle(cornerRadius: 2)
-                                        .fill(Float(i) / 8.0 < engine.audioLevel ? Color.red : Color.red.opacity(0.2))
-                                        .frame(width: 4, height: CGFloat(6 + i * 2))
+                                        .fill(Float(i) / 12.0 < engine.audioLevel ? Color.red : Color.red.opacity(0.2))
+                                        .frame(width: 4, height: CGFloat(4 + i * 3))
+                                        .animation(.easeOut(duration: 0.05), value: engine.audioLevel)
                                 }
                             }
                         }
                     } else {
-                        Label("Your line — tap Next", systemImage: "hand.tap")
+                        Label("Your line — tap →", systemImage: "hand.tap")
                             .foregroundStyle(.green)
                     }
                 case .paused:
@@ -111,7 +110,7 @@ struct RehearsalView: View {
 
             Spacer()
 
-            // Hybrid mode indicator
+            // Mode indicator
             if !sceneSetups.isEmpty {
                 Label("Hybrid", systemImage: "waveform.and.mic")
                     .font(.caption.weight(.medium))
@@ -124,17 +123,6 @@ struct RehearsalView: View {
                     .foregroundStyle(.purple)
                     .padding(.horizontal, 8).padding(.vertical, 4)
                     .background(Color.purple.opacity(0.12)).clipShape(Capsule())
-            }
-
-            // Listen mode toggle
-            Button { engine.toggleListenMode() } label: {
-                Label(engine.listenModeEnabled ? "Listen" : "Tap",
-                      systemImage: engine.listenModeEnabled ? "mic.fill" : "hand.tap")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(engine.listenModeEnabled ? .red : .secondary)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(engine.listenModeEnabled ? Color.red.opacity(0.12) : Color.secondary.opacity(0.12))
-                    .clipShape(Capsule())
             }
         }
     }

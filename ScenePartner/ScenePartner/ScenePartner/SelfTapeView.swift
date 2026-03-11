@@ -10,6 +10,7 @@ struct SelfTapeView: View {
     let userCharacters: Set<String>
     let isImprovMode: Bool
     let sceneDirection: SceneDirection
+    let sceneSetups: [String: SceneSetup]
 
     @StateObject private var camera = CameraEngine()
     @StateObject private var engine: RehearsalEngine
@@ -25,11 +26,12 @@ struct SelfTapeView: View {
     @State private var showTeleprompter = true
 
     init(script: Script, userCharacters: Set<String>,
-         isImprovMode: Bool, sceneDirection: SceneDirection) {
+         isImprovMode: Bool, sceneDirection: SceneDirection, sceneSetups: [String: SceneSetup] = [:]) {
         self.script = script
         self.userCharacters = userCharacters
         self.isImprovMode = isImprovMode
         self.sceneDirection = sceneDirection
+        self.sceneSetups = sceneSetups
 
         let s = AppSettings()
         let voiceEngine: VoiceEngineProtocol
@@ -87,6 +89,7 @@ struct SelfTapeView: View {
         .onAppear {
             engine.setUserCharacters(userCharacters)
             engine.setImprovMode(isImprovMode)
+            engine.sceneSetups = sceneSetups
             setupTakeManager()
         }
         .onChange(of: engine.state.currentLineIndex) { _, i in teleprompter.setFocus(to: i) }

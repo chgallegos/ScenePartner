@@ -1,306 +1,341 @@
 // SceneSetupView.swift
-// The "setup phase" UI — user records each partner line one at a time.
-// ElevenLabs Voice Changer converts the voice in the background.
+// Setup phase: record all partner lines for all partner characters.
+// Multi-character tab support. Re-record always available.
+// Primary CTAs: Rehearse + Record Self-Tape.
 
 import SwiftUI
 import AVFoundation
 
 struct SceneSetupView: View {
     let script: Script
-    let characterName: String
-    let onComplete: (SceneSetup) -> Void
-    let onSkip: () -> Void
+    let partnerCharacters: [Character]
+    let elevenLabsAPIKey: String
+    let targetVoiceID: String
+    let userCharacters: Set<String>
 
-    @StateObject private var manager: SceneSetupManager
     @EnvironmentObject private var settings: AppSettings
+    @State private var selectedCharacterIndex = 0
+    @State private var managers: [String: SceneSetupManager] = [:]
     @State private var currentLinePos: Int = 0
     @State private var showConfirmReset = false
-    @State private var hasRequestedMicPermission = false
+    @State private var goToRehearsal = false
+    @State private var goToSelfTape = false
 
-    init(script: Script, characterName: String, elevenLabsAPIKey: String, targetVoiceID: String,
-         onComplete: @escaping (SceneSetup) -> Void, onSkip: @escaping () -> Void) {
-        self.script = script
-        self.characterName = characterName
-        self.onComplete = onComplete
-        self.onSkip = onSkip
-        _manager = StateObject(wrappedValue: SceneSetupManager(
-            script: script,
-            characterName: characterName,
-            elevenLabsAPIKey: elevenLabsAPIKey,
-            targetVoiceID: targetVoiceID
-        ))
+    var currentCharacter: Character? {
+        guard selectedCharacterIndex < partnerCharacters.count else { return nil }
+        return partnerCharacters[selectedCharacterIndex]
     }
 
-    var currentLine: Line? {
-        guard currentLinePos < manager.partnerLines.count else { return nil }
-        return manager.partnerLines[currentLinePos]
+    var currentManager: SceneSetupManager? {
+        guard let char = currentCharacter else { return nil }
+        return managers[char.name.uppercased()]
+    }
+
+    var allSetups: [String: SceneSetup] {
+        managers.compactMapValues { $0.readyCount > 0 ? $0.setup : nil }
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            headerBar
-            Divider()
+            // Multi-character tab bar
+            if partnerCharacters.count > 1 {
+                characterTabBar
+                Divider()
+            }
+
+            // Progress header
+            if let mgr = currentManager {
+                progressHeader(mgr)
+                Divider()
+            }
+
+            // Line content
             ScrollView {
-                VStack(spacing: 24) {
-                    instructionCard
-                    if let line = currentLine {
-                        currentLineCard(line: line)
-                    } else {
-                        allDoneCard
+                VStack(spacing: 16) {
+                    if partnerCharacters.isEmpty {
+                        noPartnerView
+                    } else if let char = currentCharacter, let mgr = currentManager {
+                        if mgr.partnerLines.isEmpty {
+                            noLinesView(char)
+                        } else if currentLinePos < mgr.partnerLines.count {
+                            currentLineCard(mgr: mgr, char: char)
+                            lineListSection(mgr: mgr)
+                        } else {
+                            allDoneCard(char: char, mgr: mgr)
+                            lineListSection(mgr: mgr)
+                        }
                     }
-                    lineListSection
                 }
                 .padding()
             }
+
             Divider()
-            bottomBar
+            bottomCTAs
         }
-        .navigationTitle("Record \(characterName)'s Lines")
+        .navigationTitle("Record Partner Lines")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Menu {
-                    Button("Reset All Recordings", systemImage: "trash", role: .destructive) {
-                        showConfirmReset = true
+                if currentManager != nil {
+                    Button(role: .destructive) { showConfirmReset = true } label: {
+                        Image(systemName: "arrow.counterclockwise")
                     }
-                    Button("Skip Setup", systemImage: "forward.fill") { onSkip() }
-                } label: { Image(systemName: "ellipsis.circle") }
+                }
             }
         }
-        .confirmationDialog("Reset all recordings for \(characterName)?", isPresented: $showConfirmReset, titleVisibility: .visible) {
-            Button("Reset", role: .destructive) { resetAll() }
+        .confirmationDialog(
+            "Reset recordings for \(currentCharacter?.name ?? "")?",
+            isPresented: $showConfirmReset,
+            titleVisibility: .visible
+        ) {
+            Button("Reset", role: .destructive) {
+                if let char = currentCharacter {
+                    SceneSetupManager.deleteSetup(scriptID: script.id, characterName: char.name)
+                    initManager(for: char)
+                    currentLinePos = 0
+                }
+            }
             Button("Cancel", role: .cancel) {}
         }
-        .onAppear { requestMicPermission() }
+        .onAppear { initAllManagers() }
+        .onChange(of: selectedCharacterIndex) { _, _ in currentLinePos = 0 }
+        .background(
+            Group {
+                NavigationLink(destination: RehearsalView(
+                    script: script,
+                    userCharacters: userCharacters,
+                    isImprovMode: false,
+                    sceneSetups: allSetups
+                ), isActive: $goToRehearsal) { EmptyView() }
+
+                NavigationLink(destination: SelfTapeView(
+                    script: script,
+                    userCharacters: userCharacters,
+                    isImprovMode: false,
+                    sceneDirection: .empty,
+                    sceneSetups: allSetups
+                ), isActive: $goToSelfTape) { EmptyView() }
+            }
+        )
     }
 
-    // MARK: - Header Bar
+    // MARK: - Character Tab Bar
 
-    private var headerBar: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(manager.readyCount) of \(manager.partnerLines.count) lines ready")
-                    .font(.subheadline.weight(.semibold))
-                ProgressView(value: Double(manager.readyCount), total: Double(max(manager.partnerLines.count, 1)))
-                    .tint(.green)
-                    .frame(width: 200)
+    private var characterTabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(Array(partnerCharacters.enumerated()), id: \.element.id) { i, char in
+                    let mgr = managers[char.name.uppercased()]
+                    let ready = mgr?.readyCount ?? 0
+                    let total = mgr?.partnerLines.count ?? 0
+
+                    Button {
+                        selectedCharacterIndex = i
+                    } label: {
+                        VStack(spacing: 3) {
+                            Text(char.name)
+                                .font(.subheadline.weight(selectedCharacterIndex == i ? .semibold : .regular))
+                                .foregroundStyle(selectedCharacterIndex == i ? .primary : .secondary)
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(ready == total && total > 0 ? Color.green : (ready > 0 ? Color.orange : Color.secondary))
+                                    .frame(width: 6, height: 6)
+                                Text("\(ready)/\(total)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .overlay(alignment: .bottom) {
+                            if selectedCharacterIndex == i {
+                                Rectangle()
+                                    .fill(Color.blue)
+                                    .frame(height: 2)
+                            }
+                        }
+                    }
+                }
             }
-            Spacer()
-            if manager.allLinesReady {
-                Label("All Ready!", systemImage: "checkmark.circle.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.green)
-            }
+        }
+        .background(Color(.systemBackground))
+    }
+
+    // MARK: - Progress Header
+
+    private func progressHeader(_ mgr: SceneSetupManager) -> some View {
+        HStack(spacing: 12) {
+            ProgressView(value: Double(mgr.readyCount), total: Double(max(mgr.partnerLines.count, 1)))
+                .tint(mgr.allLinesReady ? .green : .blue)
+            Text("\(mgr.readyCount) of \(mgr.partnerLines.count) ready")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .fixedSize()
         }
         .padding(.horizontal)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-    }
-
-    // MARK: - Instruction Card
-
-    private var instructionCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("How this works", systemImage: "theatermasks.fill")
-                .font(.headline)
-                .foregroundStyle(.purple)
-            Text("Read each of \(characterName)'s lines out loud — with the emotion and timing you want. Your voice will be converted to sound like a different person. This becomes your rehearsal partner.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .padding()
-        .background(Color.purple.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.vertical, 8)
     }
 
     // MARK: - Current Line Card
 
-    private func currentLineCard(line: Line) -> some View {
-        VStack(spacing: 16) {
-            // Line number badge
+    private func currentLineCard(mgr: SceneSetupManager, char: Character) -> some View {
+        let line = mgr.partnerLines[currentLinePos]
+
+        return VStack(spacing: 14) {
+            // Navigation arrows + counter
             HStack {
-                Text("Line \(currentLinePos + 1) of \(manager.partnerLines.count)")
+                Button {
+                    if currentLinePos > 0 { currentLinePos -= 1 }
+                } label: {
+                    Image(systemName: "chevron.left.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(currentLinePos > 0 && !mgr.isRecording ? .blue : .secondary)
+                }
+                .disabled(currentLinePos == 0 || mgr.isRecording)
+
+                Spacer()
+                Text("Line \(currentLinePos + 1) of \(mgr.partnerLines.count)")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                statusBadge(for: line.index)
+
+                Button {
+                    if currentLinePos < mgr.partnerLines.count - 1 { currentLinePos += 1 }
+                } label: {
+                    Image(systemName: "chevron.right.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(currentLinePos < mgr.partnerLines.count - 1 && !mgr.isRecording ? .blue : .secondary)
+                }
+                .disabled(currentLinePos >= mgr.partnerLines.count - 1 || mgr.isRecording)
             }
 
-            // The actual line text
+            // Line text
             Text(line.text)
                 .font(.title3)
                 .multilineTextAlignment(.center)
                 .padding()
                 .frame(maxWidth: .infinity)
-                .background(Color.blue.opacity(0.06))
+                .background(Color(.secondarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
-            // Record button
-            recordButton(for: line)
-
-            // Navigation between lines
-            HStack(spacing: 24) {
-                Button {
-                    if currentLinePos > 0 { currentLinePos -= 1 }
-                } label: {
-                    Image(systemName: "chevron.left.circle.fill")
-                        .font(.title)
-                        .foregroundStyle(currentLinePos > 0 ? .blue : .secondary)
-                }
-                .disabled(currentLinePos == 0 || manager.isRecording)
-
-                Spacer()
-
-                Button {
-                    if currentLinePos < manager.partnerLines.count - 1 { currentLinePos += 1 }
-                } label: {
-                    Image(systemName: "chevron.right.circle.fill")
-                        .font(.title)
-                        .foregroundStyle(currentLinePos < manager.partnerLines.count - 1 ? .blue : .secondary)
-                }
-                .disabled(currentLinePos >= manager.partnerLines.count - 1 || manager.isRecording)
-            }
+            // Record control
+            recordControl(mgr: mgr, lineIndex: line.index)
         }
         .padding()
-        .background(Color(.secondarySystemBackground))
+        .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.06), radius: 8, y: 2)
     }
 
     @ViewBuilder
-    private func recordButton(for line: Line) -> some View {
-        let status = manager.lineStatuses[line.index] ?? .pending
-        let isThisLineRecording = manager.isRecording && manager.currentRecordingIndex == line.index
+    private func recordControl(mgr: SceneSetupManager, lineIndex: Int) -> some View {
+        let status = mgr.lineStatuses[lineIndex] ?? .pending
+        let isThisRecording = mgr.isRecording && mgr.currentRecordingIndex == lineIndex
 
-        VStack(spacing: 12) {
-            if isThisLineRecording {
-                // Live recording state
-                VStack(spacing: 8) {
-                    // Audio level meter
-                    HStack(spacing: 3) {
-                        ForEach(0..<20, id: \.self) { i in
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(Float(i) / 20.0 < manager.audioLevel ? Color.red : Color.red.opacity(0.15))
-                                .frame(width: 8, height: CGFloat(8 + i * 2))
-                        }
+        if isThisRecording {
+            VStack(spacing: 10) {
+                // Live mic meter
+                HStack(spacing: 3) {
+                    ForEach(0..<24, id: \.self) { i in
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Float(i) / 24.0 < mgr.audioLevel ? Color.red : Color.red.opacity(0.15))
+                            .frame(width: 7, height: CGFloat(6 + i * 2))
                     }
-                    .frame(height: 50)
+                }
+                .frame(height: 56)
+                .animation(.easeOut(duration: 0.05), value: mgr.audioLevel)
 
-                    Button {
-                        manager.stopRecordingAndConvert(lineIndex: line.index)
-                        // Auto-advance to next unrecorded line
-                        advanceToNextPending()
-                    } label: {
-                        HStack {
-                            Image(systemName: "stop.circle.fill")
-                            Text("Stop Recording")
-                        }
+                Button {
+                    mgr.stopRecordingAndConvert(lineIndex: lineIndex)
+                    advanceToNextPending(mgr: mgr)
+                } label: {
+                    Label("Done — Stop Recording", systemImage: "stop.circle.fill")
                         .font(.headline)
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding()
                         .background(Color.red)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+            }
+        } else {
+            switch status {
+            case .converting:
+                HStack {
+                    ProgressView().tint(.orange)
+                    Text("Converting voice...").foregroundStyle(.orange)
+                }
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+
+            case .ready:
+                HStack(spacing: 12) {
+                    Label("Ready", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.green)
+                    Spacer()
+                    Button {
+                        mgr.startRecording(lineIndex: lineIndex)
+                    } label: {
+                        Label("Re-record", systemImage: "mic.fill")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Color.indigo)
+                            .clipShape(Capsule())
                     }
                 }
-            } else {
-                switch status {
-                case .converting:
-                    HStack {
-                        ProgressView().tint(.orange)
-                        Text("Converting voice...").foregroundStyle(.orange)
-                    }
-                    .font(.subheadline.weight(.medium))
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.orange.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.green.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
 
-                case .ready:
-                    VStack(spacing: 8) {
-                        Label("Ready!", systemImage: "checkmark.circle.fill")
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.green)
-                        Button {
-                            manager.startRecording(lineIndex: line.index)
-                        } label: {
-                            Text("Re-record")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 8)
-                                .background(Color.secondary.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
-                        }
-                    }
-
-                case .failed(let msg):
-                    VStack(spacing: 6) {
-                        Label(msg, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                        recordButtonPrimary(lineIndex: line.index, label: "Try Again")
-                    }
-
-                default:
-                    recordButtonPrimary(lineIndex: line.index, label: "Hold to Record")
+            case .failed(let msg):
+                VStack(spacing: 8) {
+                    Label(msg, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.red)
+                    recordPrimaryButton(mgr: mgr, lineIndex: lineIndex, label: "Try Again")
                 }
+
+            default:
+                recordPrimaryButton(mgr: mgr, lineIndex: lineIndex, label: "Tap to Record")
             }
         }
     }
 
-    private func recordButtonPrimary(lineIndex: Int, label: String) -> some View {
-        Button {
-            manager.startRecording(lineIndex: lineIndex)
-        } label: {
-            HStack {
-                Image(systemName: "mic.fill")
-                Text(label)
-            }
-            .font(.headline)
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding()
-            .background(Color.blue)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+    private func recordPrimaryButton(mgr: SceneSetupManager, lineIndex: Int, label: String) -> some View {
+        Button { mgr.startRecording(lineIndex: lineIndex) } label: {
+            Label(label, systemImage: "mic.fill")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.blue)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-    }
-
-    // MARK: - All Done Card
-
-    private var allDoneCard: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 60))
-                .foregroundStyle(.green)
-            Text("All lines recorded!")
-                .font(.title2.weight(.bold))
-            Text("Your emotional performances have been converted. You're ready to rehearse.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity)
-        .background(Color.green.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     // MARK: - Line List
 
-    private var lineListSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func lineListSection(mgr: SceneSetupManager) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
             Text("All Lines")
-                .font(.headline)
-                .padding(.bottom, 2)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
 
-            ForEach(Array(manager.partnerLines.enumerated()), id: \.element.id) { i, line in
+            ForEach(Array(mgr.partnerLines.enumerated()), id: \.element.id) { i, line in
                 Button {
-                    guard !manager.isRecording else { return }
+                    guard !mgr.isRecording else { return }
                     currentLinePos = i
                 } label: {
-                    HStack(spacing: 12) {
-                        statusIcon(for: line.index)
-                            .frame(width: 24)
+                    HStack(spacing: 10) {
+                        lineStatusIcon(mgr: mgr, lineIndex: line.index)
+                            .frame(width: 20)
                         Text(line.text)
                             .font(.subheadline)
                             .foregroundStyle(.primary)
@@ -309,114 +344,134 @@ struct SceneSetupView: View {
                         Spacer()
                         if currentLinePos == i {
                             Image(systemName: "chevron.right")
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(.blue)
                         }
                     }
-                    .padding(.vertical, 8)
                     .padding(.horizontal, 12)
-                    .background(currentLinePos == i ? Color.blue.opacity(0.08) : Color.clear)
+                    .padding(.vertical, 8)
+                    .background(currentLinePos == i ? Color.blue.opacity(0.07) : Color(.secondarySystemBackground))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
         }
-        .padding()
-        .background(Color(.secondarySystemBackground))
+    }
+
+    @ViewBuilder
+    private func lineStatusIcon(mgr: SceneSetupManager, lineIndex: Int) -> some View {
+        switch mgr.lineStatuses[lineIndex] ?? .pending {
+        case .ready:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.subheadline)
+        case .converting:
+            ProgressView().scaleEffect(0.65).tint(.orange)
+        case .recording:
+            Image(systemName: "mic.fill").foregroundStyle(.red).font(.subheadline)
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red).font(.subheadline)
+        default:
+            Image(systemName: "circle").foregroundStyle(.secondary).font(.subheadline)
+        }
+    }
+
+    // MARK: - All Done Card
+
+    private func allDoneCard(char: Character, mgr: SceneSetupManager) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 48))
+                .foregroundStyle(.green)
+            Text("\(char.name)'s lines are ready!")
+                .font(.title3.weight(.bold))
+            Text("Your emotional performance has been voice-converted. Ready to roll.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity)
+        .background(Color.green.opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
-    // MARK: - Bottom Bar
+    private var noPartnerView: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "person.2.slash").font(.system(size: 48)).foregroundStyle(.secondary)
+            Text("No partner characters found").font(.headline)
+            Text("This script may only have one character.").foregroundStyle(.secondary)
+        }
+        .padding(32)
+    }
 
-    private var bottomBar: some View {
-        HStack(spacing: 16) {
-            Button("Skip for Now") { onSkip() }
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+    private func noLinesView(_ char: Character) -> some View {
+        VStack(spacing: 10) {
+            Image(systemName: "text.bubble").font(.system(size: 48)).foregroundStyle(.secondary)
+            Text("No lines for \(char.name)").font(.headline)
+        }
+        .padding(32)
+    }
 
-            Spacer()
+    // MARK: - Bottom CTAs
 
-            Button {
-                onComplete(manager.setup)
-            } label: {
+    private var bottomCTAs: some View {
+        VStack(spacing: 10) {
+            // Primary: Self-Tape
+            Button { goToSelfTape = true } label: {
+                HStack {
+                    Image(systemName: "video.fill")
+                    Text("Record Self-Tape")
+                        .font(.headline)
+                }
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.red)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+
+            // Secondary: Rehearse
+            Button { goToRehearsal = true } label: {
                 HStack {
                     Image(systemName: "play.fill")
-                    Text(manager.allLinesReady ? "Start Rehearsal" : "Rehearse with \(manager.readyCount) Lines")
+                    Text("Rehearse First")
+                        .font(.subheadline.weight(.semibold))
                 }
-                .font(.headline)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)
-                .background(manager.readyCount > 0 ? Color.blue : Color.secondary)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .background(Color(.secondarySystemBackground))
+                .foregroundStyle(.primary)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
             }
-            .disabled(manager.readyCount == 0)
         }
         .padding(.horizontal)
         .padding(.vertical, 12)
         .background(.ultraThinMaterial)
     }
 
-    // MARK: - Helper Views
-
-    @ViewBuilder
-    private func statusBadge(for lineIndex: Int) -> some View {
-        let status = manager.lineStatuses[lineIndex] ?? .pending
-        switch status {
-        case .ready:
-            Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                .font(.caption.weight(.semibold))
-        case .converting:
-            Label("Converting", systemImage: "arrow.triangle.2.circlepath").foregroundStyle(.orange)
-                .font(.caption.weight(.semibold))
-        case .recording:
-            Label("Recording", systemImage: "mic.fill").foregroundStyle(.red)
-                .font(.caption.weight(.semibold))
-        default:
-            Label("Pending", systemImage: "circle").foregroundStyle(.secondary)
-                .font(.caption.weight(.semibold))
-        }
-    }
-
-    @ViewBuilder
-    private func statusIcon(for lineIndex: Int) -> some View {
-        let status = manager.lineStatuses[lineIndex] ?? .pending
-        switch status {
-        case .ready:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-        case .converting:
-            ProgressView().scaleEffect(0.7).tint(.orange)
-        case .recording:
-            Image(systemName: "mic.fill").foregroundStyle(.red)
-        case .failed:
-            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.red)
-        default:
-            Image(systemName: "circle").foregroundStyle(.secondary)
-        }
-    }
-
     // MARK: - Helpers
 
-    private func advanceToNextPending() {
-        // Find the next line that isn't ready yet
-        for i in (currentLinePos + 1)..<manager.partnerLines.count {
-            let line = manager.partnerLines[i]
-            if case .ready = manager.lineStatuses[line.index] ?? .pending { continue }
+    private func initAllManagers() {
+        for char in partnerCharacters {
+            initManager(for: char)
+        }
+    }
+
+    private func initManager(for char: Character) {
+        let mgr = SceneSetupManager(
+            script: script,
+            characterName: char.name,
+            elevenLabsAPIKey: elevenLabsAPIKey,
+            targetVoiceID: targetVoiceID
+        )
+        managers[char.name.uppercased()] = mgr
+    }
+
+    private func advanceToNextPending(mgr: SceneSetupManager) {
+        for i in (currentLinePos + 1)..<mgr.partnerLines.count {
+            let line = mgr.partnerLines[i]
+            if case .ready = mgr.lineStatuses[line.index] ?? .pending { continue }
             currentLinePos = i
             return
         }
-        // All done — jump past the list to show the "all done" card
-        currentLinePos = manager.partnerLines.count
-    }
-
-    private func resetAll() {
-        SceneSetupManager.deleteSetup(scriptID: script.id, characterName: characterName)
-        // Reinit manager
-        currentLinePos = 0
-    }
-
-    private func requestMicPermission() {
-        guard !hasRequestedMicPermission else { return }
-        hasRequestedMicPermission = true
-        AVAudioSession.sharedInstance().requestRecordPermission { _ in }
+        currentLinePos = mgr.partnerLines.count
     }
 }

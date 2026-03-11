@@ -79,7 +79,18 @@ final class RehearsalEngine: ObservableObject {
         state.currentLineIndex = index
         state.sessionStartedAt = Date()
         state.completedLineIndices = []
-        processCurrentLine()
+
+        // Pre-warm the audio session so the first user line mic works immediately
+        if index == 0 {
+            Task {
+                try? AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .measurement,
+                    options: [.duckOthers, .defaultToSpeaker, .allowBluetoothHFP])
+                try? AVAudioSession.sharedInstance().setActive(true)
+                await MainActor.run { self.processCurrentLine() }
+            }
+        } else {
+            processCurrentLine()
+        }
     }
 
     func pause() {

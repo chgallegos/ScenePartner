@@ -5,9 +5,7 @@ struct RoleSelectionView: View {
     let script: Script
 
     @State private var selectedCharacters: Set<String> = []
-    @State private var isImprovMode: Bool = false
-    @State private var navigateToSetup = false
-    @State private var sceneSetups: [String: SceneSetup] = [:]
+    @State private var goToSetup = false
 
     @EnvironmentObject private var settings: AppSettings
 
@@ -15,164 +13,59 @@ struct RoleSelectionView: View {
         script.characters.filter { !selectedCharacters.contains($0.name) }
     }
 
-    /// Check if setups already exist for all partner characters
-    var existingSetupCount: Int {
-        partnerCharacters.filter { char in
-            SceneSetupManager.loadSetup(scriptID: script.id, characterName: char.name) != nil
-        }.count
-    }
-
     var body: some View {
-        Form {
-            Section {
-                Text("Select the character(s) you'll be performing. The AI partner plays everyone else.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-            }
-
-            Section("Your Character") {
-                ForEach(script.characters) { character in
-                    CharacterRowView(
-                        character: character,
-                        isSelected: selectedCharacters.contains(character.name)
-                    ) { toggle(character.name) }
+        VStack(spacing: 0) {
+            List {
+                Section {
+                    Text("Which character are you playing?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
                 }
-            }
-
-            Section("Partner Options") {
-                Toggle("Improv Mode", isOn: $isImprovMode)
-                if isImprovMode {
-                    Label("Partner may paraphrase. Disable to enforce script-only.", systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
-                }
-            }
-
-            // MARK: - Hybrid Setup Section
-            Section {
-                NavigationLink(
-                    destination: setupDestination,
-                    isActive: $navigateToSetup
-                ) { EmptyView() }.hidden()
-
-                Button {
-                    loadExistingSetups()
-                    navigateToSetup = true
-                } label: {
-                    HStack {
-                        Image(systemName: "waveform.and.mic")
-                            .foregroundStyle(.indigo)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Record Partner Lines")
-                                .font(.body.weight(.medium))
-                            Group {
-                                if existingSetupCount > 0 {
-                                    Text("\(existingSetupCount) of \(partnerCharacters.count) character(s) recorded ✓")
-                                        .foregroundStyle(.green)
-                                } else {
-                                    Text("Your emotion, their voice — best results")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .font(.caption)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").foregroundStyle(.secondary).font(.caption)
+                Section("Characters") {
+                    ForEach(script.characters) { character in
+                        CharacterRowView(
+                            character: character,
+                            isSelected: selectedCharacters.contains(character.name)
+                        ) { toggle(character.name) }
                     }
                 }
-                .disabled(selectedCharacters.isEmpty)
-            } header: {
-                Text("Hybrid Rehearsal")
-            } footer: {
-                Text("Record the partner's lines yourself with the right emotion. The app converts your voice to sound like a different person.")
-                    .font(.caption)
             }
+            .listStyle(.insetGrouped)
 
-            Section {
-                // Rehearse button
-                NavigationLink(
-                    destination: RehearsalView(
-                        script: script,
-                        userCharacters: selectedCharacters,
-                        isImprovMode: isImprovMode,
-                        sceneSetups: loadedSetups()
-                    )
-                ) {
-                    HStack {
-                        Image(systemName: "play.fill").foregroundStyle(.blue)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Rehearse").font(.headline)
-                            Text(loadedSetups().isEmpty ? "AI voice mode" : "Hybrid mode active")
-                                .font(.caption)
-                                .foregroundStyle(loadedSetups().isEmpty ? Color.secondary : Color.indigo)
-                        }
-                        Spacer()
-                    }
-                }
-                .disabled(selectedCharacters.isEmpty)
+            Divider()
 
-                // Self-Tape button
-                NavigationLink(
-                    destination: SelfTapeView(
-                        script: script,
-                        userCharacters: selectedCharacters,
-                        isImprovMode: isImprovMode,
-                        sceneDirection: .empty
-                    )
-                ) {
-                    HStack {
-                        Image(systemName: "video.fill").foregroundStyle(.red)
-                        Text("Record Self-Tape").font(.headline)
-                        Spacer()
-                        Text("Camera + AI partner").font(.caption).foregroundStyle(.secondary)
-                    }
+            NavigationLink(
+                destination: SceneSetupView(
+                    script: script,
+                    partnerCharacters: partnerCharacters,
+                    elevenLabsAPIKey: settings.elevenLabsAPIKey,
+                    targetVoiceID: settings.elevenLabsVoiceID,
+                    userCharacters: selectedCharacters
+                ),
+                isActive: $goToSetup
+            ) { EmptyView() }
+
+            Button {
+                goToSetup = true
+            } label: {
+                HStack {
+                    Image(systemName: "arrow.right.circle.fill")
+                    Text("Continue")
+                        .font(.headline)
                 }
-                .disabled(selectedCharacters.isEmpty)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(selectedCharacters.isEmpty ? Color.secondary : Color.blue)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal)
+                .padding(.vertical, 12)
             }
+            .disabled(selectedCharacters.isEmpty)
         }
         .navigationTitle(script.title)
-        .onAppear { loadExistingSetups() }
-    }
-
-    // MARK: - Setup Destination
-
-    @ViewBuilder
-    private var setupDestination: some View {
-        if let firstPartner = partnerCharacters.first {
-            SceneSetupView(
-                script: script,
-                characterName: firstPartner.name,
-                elevenLabsAPIKey: settings.elevenLabsAPIKey,
-                targetVoiceID: settings.elevenLabsVoiceID,
-                onComplete: { setup in
-                    sceneSetups[firstPartner.name.uppercased()] = setup
-                    navigateToSetup = false
-                },
-                onSkip: {
-                    navigateToSetup = false
-                }
-            )
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func loadExistingSetups() {
-        for char in partnerCharacters {
-            if let setup = SceneSetupManager.loadSetup(scriptID: script.id, characterName: char.name) {
-                sceneSetups[char.name.uppercased()] = setup
-            }
-        }
-    }
-
-    private func loadedSetups() -> [String: SceneSetup] {
-        // Merge in-memory setups with any saved ones
-        var result = sceneSetups
-        for char in partnerCharacters {
-            if result[char.name.uppercased()] == nil,
-               let saved = SceneSetupManager.loadSetup(scriptID: script.id, characterName: char.name) {
-                result[char.name.uppercased()] = saved
-            }
-        }
-        return result
+        .navigationBarTitleDisplayMode(.large)
     }
 
     private func toggle(_ name: String) {
@@ -194,10 +87,11 @@ struct CharacterRowView: View {
                     Text("\(character.lineCount) lines").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.blue).font(.title2)
-                }
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? .blue : .secondary)
+                    .font(.title2)
             }
+            .contentShape(Rectangle())
         }
     }
 }
