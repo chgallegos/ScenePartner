@@ -11,7 +11,7 @@ final class AppSettings: ObservableObject {
     @AppStorage("defaultSpeechPitch") var defaultSpeechPitch: Double = 1.0
     @AppStorage("defaultVoiceIdentifier") var defaultVoiceIdentifier: String = ""
     @AppStorage("elevenLabsAPIKey") var elevenLabsAPIKey: String = ""
-    @AppStorage("elevenLabsVoiceID") var elevenLabsVoiceID: String = "onwK4e9ZLuTAKqWW03F9"
+    @AppStorage("elevenLabsVoiceID") var elevenLabsVoiceID: String = "IKne3meq5aSn9XLyUdCD"
     @AppStorage("useAIVoice") var useAIVoice: Bool = false
 
     // MARK: - Adaptive Director

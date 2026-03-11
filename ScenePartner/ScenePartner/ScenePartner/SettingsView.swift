@@ -39,15 +39,18 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Partner Voice").font(.caption).foregroundStyle(.secondary)
                     Picker("Voice", selection: $settings.elevenLabsVoiceID) {
+                        // These voices work well with speech-to-speech conversion
+                        Text("Charlie — natural, conversational").tag("IKne3meq5aSn9XLyUdCD")
+                        Text("George — warm, grounded").tag("JBFqnCBsd6RMkjVDRZzb")
+                        Text("Liam — expressive, young").tag("TX3LPaxmHKxFdv7VOQHJ")
                         Text("Daniel — deep, clear").tag("onwK4e9ZLuTAKqWW03F9")
                         Text("Adam — dramatic, powerful").tag("pNInz6obpgDQGcFmaJgB")
-                        Text("Josh — warm, grounded").tag("TxGEqnHWrfWFTfGW9XjX")
-                        Text("Antoni — natural").tag("ErXwobaYiN019PkySvjV")
-                        Text("Bella — warm, natural").tag("EXAVITQu4vr4xnSDxMaL")
-                        Text("Elli — emotional, expressive").tag("MF3mGyEYCl7XYWbV9V6O")
+                        Text("Matilda — warm, natural").tag("XrExE9yKIg1WjnnlVkGX")
+                        Text("Sarah — soft, expressive").tag("EXAVITQu4vr4xnSDxMaL")
+                        Text("Aria — natural, clear").tag("9BWtsMINqrJLrRacOk9x")
                     }
                     .pickerStyle(.navigationLink)
-                    Text("This voice is used for both partner lines and voice conversion.")
+                    Text("Charlie or George work best for speech-to-speech conversion.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             } header: {
