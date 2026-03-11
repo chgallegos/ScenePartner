@@ -220,19 +220,26 @@ final class SceneSetupManager: NSObject, ObservableObject {
         body.append(audioData)
         body.append("\r\n".data(using: .utf8)!)
 
-        // Model - use multilingual for best emotional preservation
+        // eleven_multilingual_sts_v2 preserves emotion far better than english v2
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"model_id\"\r\n\r\n".data(using: .utf8)!)
-        body.append("eleven_english_sts_v2\r\n".data(using: .utf8)!)
+        body.append("eleven_multilingual_sts_v2\r\n".data(using: .utf8)!)
 
-        // Voice settings - high similarity to preserve emotional nuance
-        let voiceSettings = """
-        {"stability": 0.25, "similarity_boost": 0.90, "style": 0.4, "use_speaker_boost": true}
-        """
+        // stability: how stable the voice is (lower = more expressive)
+        // similarity_boost: how closely to match target voice vs preserve YOUR delivery
+        //   0.65 = good balance — voice sounds different but your emotion comes through
+        // style: 0 = don't add artificial style on top of your performance
+        // use_speaker_boost: false = don't over-process, keep it natural
+        let voiceSettings = "{\"stability\":0.30,\"similarity_boost\":0.60,\"style\":0.0,\"use_speaker_boost\":false}"
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
         body.append("Content-Disposition: form-data; name=\"voice_settings\"\r\n\r\n".data(using: .utf8)!)
         body.append(voiceSettings.data(using: .utf8)!)
         body.append("\r\n".data(using: .utf8)!)
+
+        // Remove background noise from iPad mic recording
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"remove_background_noise\"\r\n\r\n".data(using: .utf8)!)
+        body.append("true\r\n".data(using: .utf8)!)
 
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
         request.httpBody = body
