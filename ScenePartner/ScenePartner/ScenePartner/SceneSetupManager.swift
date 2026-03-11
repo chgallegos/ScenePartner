@@ -166,7 +166,7 @@ final class SceneSetupManager: NSObject, ObservableObject {
         lineStatuses[lineIndex] = .converting
 
         guard !elevenLabsAPIKey.isEmpty else {
-            print("[SceneSetup] ⚠️ No ElevenLabs API key — using raw recording (no voice change)")
+            print("[SceneSetup] ⚠️ No API key — using raw recording (no voice change)")
             let outputPath = saveRawRecording(from: url, lineIndex: lineIndex)
             setup.convertedAudioPaths[lineIndex] = outputPath
             lineStatuses[lineIndex] = .ready
@@ -174,16 +174,26 @@ final class SceneSetupManager: NSObject, ObservableObject {
             return
         }
 
+        // Log the raw recording info
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? Int {
+            let duration = Double(size) / (44100 * 1 * 2)  // rough estimate
+            print("[SceneSetup] 🎤 Raw recording: \(size) bytes (~\(String(format: "%.1f", duration))s) at \(url.lastPathComponent)")
+        }
+
         do {
+            print("[SceneSetup] 📡 Sending to ElevenLabs STS API...")
             let convertedData = try await callVoiceChangerAPI(audioURL: url)
             let outputURL = convertedAudioURL(for: lineIndex)
             try convertedData.write(to: outputURL)
             setup.convertedAudioPaths[lineIndex] = outputURL.path
             lineStatuses[lineIndex] = .ready
             saveSetup()
-            print("[SceneSetup] ✅ Line \(lineIndex) voice-converted and saved (\(convertedData.count) bytes)")
+            print("[SceneSetup] ✅ Line \(lineIndex) CONVERTED — \(convertedData.count) bytes saved to \(outputURL.lastPathComponent)")
+            print("[SceneSetup] 🎭 This line will play as voice-converted audio during rehearsal")
         } catch {
-            print("[SceneSetup] ❌ Voice conversion failed for line \(lineIndex): \(error) — falling back to raw audio")
+            print("[SceneSetup] ❌ CONVERSION FAILED line \(lineIndex): \(error)")
+            print("[SceneSetup] ⚠️ Falling back to RAW recording — voice will NOT be changed for this line")
             let outputPath = saveRawRecording(from: url, lineIndex: lineIndex)
             setup.convertedAudioPaths[lineIndex] = outputPath
             lineStatuses[lineIndex] = .ready
@@ -194,10 +204,17 @@ final class SceneSetupManager: NSObject, ObservableObject {
     private func callVoiceChangerAPI(audioURL: URL) async throws -> Data {
         // Use a voice well-suited for emotional conversion
         // Daniel (onwK4e9ZLuTAKqWW03F9) for male, Bella (EXAVITQu4vr4xnSDxMaL) for female
-        let conversionVoiceID = targetVoiceID.isEmpty ? "onwK4e9ZLuTAKqWW03F9" : targetVoiceID
+        let conversionVoiceID = targetVoiceID.isEmpty ? "IKne3meq5aSn9XLyUdCD" : targetVoiceID
         let apiURL = URL(string: "https://api.elevenlabs.io/v1/speech-to-speech/\(conversionVoiceID)/stream")!
 
-        print("[SceneSetup] 🎙️ Calling Voice Changer API with voice: \(conversionVoiceID)")
+        print("""
+        [SceneSetup] 🌐 API Call:
+          URL: \(apiURL)
+          Voice ID: \(conversionVoiceID)
+          Model: eleven_multilingual_sts_v2
+          stability: 0.30, similarity_boost: 0.60, style: 0.0
+          API key ending: ...\(elevenLabsAPIKey.suffix(6))
+        """)
 
         var request = URLRequest(url: apiURL)
         request.httpMethod = "POST"

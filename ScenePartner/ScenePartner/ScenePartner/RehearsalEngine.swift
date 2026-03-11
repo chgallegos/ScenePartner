@@ -196,12 +196,30 @@ final class RehearsalEngine: ObservableObject {
         // HYBRID MODE: use pre-recorded converted audio if available
         if let setup = sceneSetups[speaker.uppercased()],
            let path = setup.convertedAudioPaths[line.index] {
-            playSetupAudio(at: URL(fileURLWithPath: path))
+            let fileExists = FileManager.default.fileExists(atPath: path)
+            let fileSize = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
+            print("""
+            [RehearsalEngine] 🎭 HYBRID playback for \(speaker) line \(line.index):
+              Path: \(URL(fileURLWithPath: path).lastPathComponent)
+              File exists: \(fileExists)
+              File size: \(fileSize) bytes
+              Text: "\(line.text.prefix(50))"
+            """)
+            if fileExists && fileSize > 1000 {
+                playSetupAudio(at: URL(fileURLWithPath: path))
+            } else {
+                print("[RehearsalEngine] ⚠️ Setup audio invalid (missing or too small) — falling back to TTS")
+                fallbackToTTS(line: line, speaker: speaker)
+            }
             adaptiveDirectors[speaker]?.recordLine(speaker: speaker, text: line.text)
             return
         }
 
-        // FALLBACK: standard TTS via ElevenLabs or system voice
+        print("[RehearsalEngine] 🤖 No setup audio for \(speaker) line \(line.index) — using TTS")
+        fallbackToTTS(line: line, speaker: speaker)
+    }
+
+    private func fallbackToTTS(line: Line, speaker: String) {
         let tones = toneAnalysis?.sceneTone ?? []
         let profile = toneEngine.profile(for: speaker, sceneTones: tones, analysis: toneAnalysis)
 
