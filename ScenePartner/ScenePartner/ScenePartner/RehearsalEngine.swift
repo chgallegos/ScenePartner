@@ -194,28 +194,39 @@ final class RehearsalEngine: ObservableObject {
         let speaker = line.speaker ?? "NARRATOR"
 
         // HYBRID MODE: use pre-recorded converted audio if available
-        if let setup = sceneSetups[speaker.uppercased()],
-           let path = setup.convertedAudioPaths[line.index] {
-            let fileExists = FileManager.default.fileExists(atPath: path)
-            let fileSize = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
-            print("""
-            [RehearsalEngine] 🎭 HYBRID playback for \(speaker) line \(line.index):
-              Path: \(URL(fileURLWithPath: path).lastPathComponent)
-              File exists: \(fileExists)
-              File size: \(fileSize) bytes
-              Text: "\(line.text.prefix(50))"
-            """)
-            if fileExists && fileSize > 1000 {
-                playSetupAudio(at: URL(fileURLWithPath: path))
-            } else {
-                print("[RehearsalEngine] ⚠️ Setup audio invalid (missing or too small) — falling back to TTS")
-                fallbackToTTS(line: line, speaker: speaker)
+        if let setup = sceneSetups[speaker.uppercased()] {
+            // Find the manager to resolve the URL properly
+            let filename = setup.convertedAudioPaths[line.index]
+            let resolvedURL = filename.map { _ in
+                SceneSetupManager.resolveAudioURL(
+                    scriptID: setup.scriptID,
+                    characterName: setup.characterName,
+                    lineIndex: line.index
+                )
+            } ?? nil
+
+            if let url = resolvedURL {
+                let fileExists = FileManager.default.fileExists(atPath: url.path)
+                let fileSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+                print("""
+                [RehearsalEngine] 🎭 HYBRID playback for \(speaker) line \(line.index):
+                  File: \(url.lastPathComponent)
+                  Exists: \(fileExists), Size: \(fileSize) bytes
+                  Text: "\(line.text.prefix(50))"
+                """)
+                if fileExists && fileSize > 1000 {
+                    playSetupAudio(at: url)
+                    adaptiveDirectors[speaker]?.recordLine(speaker: speaker, text: line.text)
+                    return
+                } else {
+                    print("[RehearsalEngine] ⚠️ File missing or too small — falling back to TTS")
+                }
+            } else if filename != nil {
+                print("[RehearsalEngine] ⚠️ Could not resolve URL for line \(line.index) — falling back to TTS")
             }
-            adaptiveDirectors[speaker]?.recordLine(speaker: speaker, text: line.text)
-            return
         }
 
-        print("[RehearsalEngine] 🤖 No setup audio for \(speaker) line \(line.index) — using TTS")
+        print("[RehearsalEngine] 🤖 Using TTS for \(speaker) line \(line.index)")
         fallbackToTTS(line: line, speaker: speaker)
     }
 

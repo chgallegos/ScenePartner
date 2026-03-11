@@ -186,7 +186,7 @@ final class SceneSetupManager: NSObject, ObservableObject {
             let convertedData = try await callVoiceChangerAPI(audioURL: url)
             let outputURL = convertedAudioURL(for: lineIndex)
             try convertedData.write(to: outputURL)
-            setup.convertedAudioPaths[lineIndex] = outputURL.path
+            setup.convertedAudioPaths[lineIndex] = outputURL.lastPathComponent  // filename only
             lineStatuses[lineIndex] = .ready
             saveSetup()
             print("[SceneSetup] ✅ Line \(lineIndex) CONVERTED — \(convertedData.count) bytes saved to \(outputURL.lastPathComponent)")
@@ -277,9 +277,13 @@ final class SceneSetupManager: NSObject, ObservableObject {
 
     // MARK: - Playback helper
 
-    func audioURL(for lineIndex: Int) -> URL? {
-        guard let path = setup.convertedAudioPaths[lineIndex] else { return nil }
-        return URL(fileURLWithPath: path)
+    func resolvedAudioURL(for lineIndex: Int) -> URL? {
+        guard let filename = setup.convertedAudioPaths[lineIndex] else { return nil }
+        // Always reconstruct full path at runtime — never trust stored absolute paths
+        // which become stale after reinstalls or app container UUID changes
+        let url = Self.setupDirectory(scriptID: setup.scriptID, characterName: characterName)
+            .appendingPathComponent(filename)
+        return url
     }
 
     // MARK: - Computed
@@ -303,7 +307,7 @@ final class SceneSetupManager: NSObject, ObservableObject {
     private func saveRawRecording(from url: URL, lineIndex: Int) -> String {
         let outputURL = convertedAudioURL(for: lineIndex)
         try? FileManager.default.copyItem(at: url, to: outputURL)
-        return outputURL.path
+        return outputURL.lastPathComponent  // store filename only
     }
 
     private func tempAudioURL(for lineIndex: Int) -> URL {
@@ -328,7 +332,11 @@ final class SceneSetupManager: NSObject, ObservableObject {
             .appendingPathComponent("setup.json")
     }
 
-    func saveSetup() {
+    // Resolve a stored filename back to a full URL at runtime
+    static func resolveAudioURL(scriptID: UUID, characterName: String, lineIndex: Int) -> URL {
+        setupDirectory(scriptID: scriptID, characterName: characterName)
+            .appendingPathComponent("line_\(lineIndex).mp3")
+    }
         let url = Self.setupMetaURL(scriptID: setup.scriptID, characterName: characterName)
         if let data = try? JSONEncoder().encode(setup) {
             try? data.write(to: url)
